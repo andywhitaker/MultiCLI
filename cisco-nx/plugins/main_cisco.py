@@ -271,7 +271,7 @@ class Plugin(CliPlugin):
         output.print_line('\nTry SR Linux command: show network-instance default protocols bgp neighbor')
 
     def _print_ip_bgp_vrf_summary(self, state, arguments, output, **_kwargs):
-        vrf_name = arguments.get('vrf_name') or 'default'
+        vrf_name = arguments.get('vrf', 'vrf_name') if arguments.has_node('vrf') else 'default'
         IpBgpReport().show_bgp_summary(state, output, network_instance=vrf_name)
         output.print_line(f'\nTry SR Linux command: show network-instance {vrf_name} protocols bgp neighbor')
 

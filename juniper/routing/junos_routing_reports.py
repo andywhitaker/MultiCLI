@@ -4,6 +4,8 @@
 # Copyright (c) 2025-2026 Nokia
 ###########################################################################
 
+import datetime
+import ipaddress
 import re
 from srlinux.location import build_path
 
@@ -240,6 +242,189 @@ class JunosRoutingReports:
         output.print_line("\n".join(lines).rstrip())
         output.print_line("\n----------------------------------------------------------------------------------------------------")
         output.print_line("Try SR Linux command: show lag")
+
+    def show_route(self, state, output, network_instance='default'):
+        """Display Juniper JUNOS style 'show route' table."""
+        path_routes = build_path(f'/network-instance[name={network_instance}]/route-table')
+        routes_data = None
+        try:
+            routes_data = state.server_data_store.get_data(path_routes, recursive=True)
+        except Exception:
+            pass
+
+        if not routes_data:
+            output.print_line(f"error: table {network_instance} not found")
+            return
+
+        nh_map = {}
+        try:
+            for nh in routes_data.get_descendants('/network-instance/route-table/next-hop'):
+                nh_idx = getattr(nh, 'index', None)
+                if nh_idx is None:
+                    continue
+                nh_type = getattr(nh, 'type', None)
+                ip = getattr(nh, 'ip_address', None)
+                subif = getattr(nh, 'subinterface', None)
+                resolving_nhg = None
+                if nh_type == 'tunnel' and hasattr(nh, 'tunnel'):
+                    try:
+                        t = nh.tunnel.get()
+                        pfx = getattr(t, 'ip_prefix', None)
+                        if pfx and not ip:
+                            ip = str(pfx).split('/')[0]
+                    except Exception:
+                        pass
+                if nh_type == 'indirect' and hasattr(nh, 'indirect'):
+                    try:
+                        ind = nh.indirect.get()
+                        rr = getattr(ind, 'resolving_route', None)
+                        if rr:
+                            resolving_nhg = getattr(rr.get(), 'next_hop_group', None)
+                    except Exception:
+                        pass
+                nh_map[str(nh_idx)] = {
+                    'ip': str(ip) if ip else None,
+                    'interface': str(subif) if subif else None,
+                    'resolving_nhg': str(resolving_nhg) if resolving_nhg is not None else None,
+                }
+        except Exception:
+            pass
+
+        nhg_map = {}
+        try:
+            for nhg in routes_data.get_descendants('/network-instance/route-table/next-hop-group'):
+                nhg_idx = getattr(nhg, 'index', None)
+                if nhg_idx is not None and hasattr(nhg, 'next_hop'):
+                    hops = []
+                    for nh_item in nhg.next_hop.items():
+                        target_nh = getattr(nh_item, 'next_hop', None)
+                        if target_nh is not None and str(target_nh) in nh_map:
+                            hops.append(nh_map[str(target_nh)])
+                    nhg_map[str(nhg_idx)] = hops
+        except Exception:
+            pass
+
+        for nh_info in nh_map.values():
+            if not nh_info['interface'] and nh_info.get('resolving_nhg'):
+                target_hops = nhg_map.get(nh_info['resolving_nhg'], [])
+                for th in target_hops:
+                    if th.get('interface'):
+                        nh_info['interface'] = th['interface']
+                        break
+
+        all_routes = []
+        try:
+            for r in routes_data.get_descendants('/network-instance/route-table/ipv4-unicast/route'):
+                pfx = getattr(r, 'ipv4_prefix', None)
+                if not pfx:
+                    continue
+                rtype = str(getattr(r, 'route_type', '')).lower()
+                rowner = str(getattr(r, 'route_owner', '')).lower()
+                pref = getattr(r, 'preference', None)
+                nhg_id = getattr(r, 'next_hop_group', None)
+                hops = nhg_map.get(str(nhg_id), []) if nhg_id is not None else []
+
+                # Format protocol and preference
+                if 'connected' in rowner or (rtype == 'local' and 'host' not in rtype):
+                    proto_name = 'Direct'
+                    default_pref = 0
+                elif 'host' in rtype or 'local' in rowner:
+                    proto_name = 'Local'
+                    default_pref = 0
+                elif 'bgp' in rtype or 'bgp' in rowner:
+                    proto_name = 'BGP'
+                    default_pref = 170
+                elif 'static' in rtype or 'static' in rowner:
+                    proto_name = 'Static'
+                    default_pref = 5
+                elif 'ospf' in rtype or 'ospf' in rowner:
+                    proto_name = 'OSPF'
+                    default_pref = 10
+                elif 'isis' in rtype or 'isis' in rowner:
+                    proto_name = 'IS-IS'
+                    default_pref = 15
+                else:
+                    proto_name = rowner.capitalize() if rowner else 'Direct'
+                    default_pref = 0
+
+                pref_val = pref if (pref is not None and pref > 0) else default_pref
+
+                # Calculate uptime
+                uptime_str = ""
+                if hasattr(r, 'last_app_update') and r.last_app_update:
+                    try:
+                        ts_str = str(r.last_app_update).split(' (')[0].strip()
+                        if 'Z' in ts_str:
+                            ts_str = ts_str.replace('Z', '+00:00')
+                        dt = datetime.datetime.fromisoformat(ts_str)
+                        now = datetime.datetime.now(datetime.timezone.utc)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=datetime.timezone.utc)
+                        sec = max(0, int((now - dt).total_seconds()))
+                        d, rem = divmod(sec, 86400)
+                        h, rem = divmod(rem, 3600)
+                        m, s = divmod(rem, 60)
+                        if d > 0:
+                            uptime_str = f"{d}d {h:02d}:{m:02d}:{s:02d}"
+                        else:
+                            uptime_str = f"{h:02d}:{m:02d}:{s:02d}"
+                    except Exception:
+                        uptime_str = ""
+
+                intf_val = hops[0].get('interface') if (hops and hops[0].get('interface')) else None
+
+                all_routes.append({
+                    'prefix': str(pfx),
+                    'proto': proto_name,
+                    'pref': pref_val,
+                    'uptime': uptime_str,
+                    'hops': hops,
+                    'interface': intf_val,
+                })
+        except Exception:
+            pass
+
+        try:
+            all_routes = sorted(all_routes, key=lambda x: int(ipaddress.ip_network(x['prefix']).network_address))
+        except Exception:
+            pass
+
+        tbl_name = f"{network_instance}.0" if network_instance != 'default' else "inet.0"
+        total = len(all_routes)
+        lines = [
+            f"{tbl_name}: {total} destinations, {total} routes ({total} active, 0 holddown, 0 hidden)",
+            "+ = Active Route, - = Last Active, * = Both",
+            ""
+        ]
+
+        for rt in all_routes:
+            prefix = rt['prefix']
+            tag = f"*[{rt['proto']}/{rt['pref']}]"
+            up = f" {rt['uptime']}" if rt['uptime'] else ""
+            lines.append(f"{prefix:<20}{tag}{up}")
+
+            if rt['proto'] == 'Local':
+                intf_str = format_junos_intf(rt['interface']) if rt['interface'] else "lo0.0"
+                lines.append(f"                      Local via {intf_str}")
+            elif rt['proto'] == 'Direct':
+                intf_str = format_junos_intf(rt['interface']) if rt['interface'] else "-"
+                lines.append(f"                    > via {intf_str}")
+            elif rt['hops']:
+                for h in rt['hops']:
+                    h_ip = h.get('ip')
+                    h_intf = format_junos_intf(h.get('interface')) if h.get('interface') else None
+                    if h_ip and h_intf and h_intf != "-":
+                        lines.append(f"                    > to {h_ip} via {h_intf}")
+                    elif h_ip:
+                        lines.append(f"                    > to {h_ip}")
+                    elif h_intf and h_intf != "-":
+                        lines.append(f"                    > via {h_intf}")
+            else:
+                lines.append("                    Receive")
+
+        output.print_line("\n".join(lines).rstrip())
+        output.print_line("\n----------------------------------------------------------------------------------------------------")
+        output.print_line(f"Try SR Linux command: show network-instance {network_instance} route-table")
 
     def show_route_summary(self, state, output):
         """Display Juniper JUNOS style 'show route summary'."""

@@ -342,8 +342,17 @@ class JunosSystemReports:
                 size_k = f"{vsz}K"
                 res_k = f"{rss}K"
                 wcpu = f"{cpu}%"
+                thr = '1'
+                try:
+                    with open(f'/proc/{pid}/status') as sf:
+                        for s_line in sf:
+                            if s_line.startswith('Threads:'):
+                                thr = s_line.split(':', 1)[1].strip()
+                                break
+                except Exception:
+                    pass
                 s_name = "select" if stat.startswith('S') else ("run" if stat.startswith('R') else "stop")
-                lines.append(f"{pid:>6} {usr:<10} {'1':<4} {pri:<4} {ni:<5} {size_k:>8} {res_k:>7} {s_name:<8} {tm:>8} {wcpu:>6} {comm}")
+                lines.append(f"{pid:>6} {usr:<10} {thr:<4} {pri:<4} {ni:<5} {size_k:>8} {res_k:>7} {s_name:<8} {tm:>8} {wcpu:>6} {comm}")
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")

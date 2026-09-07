@@ -192,6 +192,7 @@ class AristaInterfaceReports:
         neighbors = []
         calculated_ttl = 120
         age_outs = 0
+        table_drops = 0
         min_elapsed_seconds = None
 
         try:
@@ -204,6 +205,7 @@ class AristaInterfaceReports:
             if hasattr(lldp_node, 'statistics') and lldp_node.statistics.exists():
                 stats = lldp_node.statistics.get()
                 age_outs = getattr(stats, 'entries_aged_out', 0) or 0
+                table_drops = getattr(stats, 'frame_discard', 0) or getattr(stats, 'frame_error_in', 0) or 0
         except Exception:
             pass
 
@@ -259,7 +261,7 @@ class AristaInterfaceReports:
             lines.append(f"Last table change time   : {last_change_str}")
             lines.append(f"Number of table inserts  : {len(neighbors)}")
             lines.append("Number of table deletes  : 0")
-            lines.append("Number of table drops    : 0")
+            lines.append(f"Number of table drops    : {table_drops}")
             lines.append(f"Number of table age-outs : {age_outs}")
             lines.append(f"{'Port':<13} {'Neighbor Device ID':<24} {'Neighbor Port ID':<22} {'TTL':<3}")
             lines.append(f"{'----------':<13} {'------------------------':<24} {'----------------------':<22} {'---':<3}")

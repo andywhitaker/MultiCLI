@@ -47,7 +47,10 @@ TEST_SUITES = {
             "show isis neighbors",
             "show mlag",
             "show ip bgp summary",
+            "show ip bgp vrf default summary",
             "show bgp evpn summary",
+            "show interface status",
+            "show interfaces status",
         ],
         "negative_assertions": [
             ("show mlag", "state: Active", "show mlag should not output hardcoded 'state: Active' when no MLAG is configured"),
@@ -61,6 +64,8 @@ TEST_SUITES = {
         "positive_assertions": [
             ("show ip route", "Gateway of last resort", "show ip route must contain Gateway of last resort header"),
             ("show ip arp", "Age (min)", "show ip arp must contain Age (min) column"),
+            ("show interfaces status", "Ethernet1/1", "show interfaces status must format interfaces in Arista style EthernetX/Y"),
+            ("show ip bgp vrf default summary", "BGP summary information for VRF default", "show ip bgp vrf default summary must output VRF BGP summary"),
         ]
     },
     "Cisco NX-OS": {
@@ -95,10 +100,13 @@ TEST_SUITES = {
             "show ip route",
             "show ip route vrf default",
             "show ip bgp summary",
+            "show ip bgp vrf default summary",
             "show mac address-table",
             "show mac address-table vlan 1",
+            "show mac address-table vlan 10",
             "show mac address-table interface ethernet-1/1",
             "show mac address-table vni 1",
+            "show mac address-table vni 10010",
             "show vrf",
             "show vlan",
             "show bfd neighbors",
@@ -116,9 +124,11 @@ TEST_SUITES = {
         ],
         "positive_assertions": [
             ("show processes cpu", "CPU utilization for five seconds:", "show processes cpu must contain CPU utilization summary"),
+            ("show processes cpu", "re:Invoked\\s+uSecs", "show processes cpu must include Invoked and uSecs columns"),
             ("show ip arp", "MAC Address", "show ip arp must contain MAC Address header"),
             ("show ip route", "re:via \\d+\\.\\d+\\.\\d+\\.\\d+", "show ip route must dynamically resolve next-hop IP"),
             ("show ip route", "re:Eth\\d+/\\d+", "show ip route must dynamically resolve outgoing Cisco-formatted interface"),
+            ("show ip bgp vrf default summary", "BGP summary information for VRF default", "show ip bgp vrf default summary must output VRF BGP summary"),
         ]
     },
     "Juniper JUNOS": {
@@ -144,6 +154,7 @@ TEST_SUITES = {
             "show ethernet-switching table vlan 1",
             "show ethernet-switching table instance default",
             "show ethernet-switching table interface ethernet-1/1",
+            "show route",
             "show route summary",
             "show bgp summary",
             "show ospf neighbor",
@@ -151,6 +162,11 @@ TEST_SUITES = {
         ],
         "negative_assertions": [
             ("show system uptime", "Time Source: NTP CLOCK", "show system uptime should dynamically verify NTP state rather than hardcoding NTP CLOCK"),
+        ],
+        "positive_assertions": [
+            ("show route", "re:inet\\.0: \\d+ destinations", "show route must contain destinations and routes header"),
+            ("show route", "re:et-\\d+/\\d+/\\d+\\.\\d+", "show route must contain Juniper formatted interfaces"),
+            ("show system processes", "re:THR\\s+PRI", "show system processes must include THR column"),
         ]
     }
 }

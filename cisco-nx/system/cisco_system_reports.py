@@ -429,7 +429,25 @@ class CiscoSystemReports:
                         ms = int(t_parts[0]) * 60000 + int(float(t_parts[1]) * 1000)
                     elif len(t_parts) == 3:
                         ms = int(t_parts[0]) * 3600000 + int(t_parts[1]) * 60000 + int(float(t_parts[2]) * 1000)
-                    lines.append(f"{pid:<6} {str(ms):<13} {'1':<12} {'0':<6} {f'{cpu}%':<6} {comm}")
+                    # Read context switches from /proc/<pid>/status for Invoked
+                    invoked_val = 1
+                    try:
+                        v_ctx = 0
+                        nv_ctx = 0
+                        with open(f'/proc/{pid}/status') as sf:
+                            for s_line in sf:
+                                if s_line.startswith('voluntary_ctxt_switches:'):
+                                    v_ctx = int(s_line.split(':', 1)[1].strip())
+                                elif s_line.startswith('nonvoluntary_ctxt_switches:'):
+                                    nv_ctx = int(s_line.split(':', 1)[1].strip())
+                        tot_ctx = v_ctx + nv_ctx
+                        if tot_ctx > 0:
+                            invoked_val = tot_ctx
+                    except Exception:
+                        pass
+
+                    usecs_val = (ms * 1000) // invoked_val if invoked_val > 0 else 0
+                    lines.append(f"{pid:<6} {str(ms):<13} {str(invoked_val):<12} {str(usecs_val):<6} {f'{cpu}%':<6} {comm}")
         except Exception:
             pass
 

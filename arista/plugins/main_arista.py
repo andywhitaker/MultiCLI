@@ -138,6 +138,15 @@ class Plugin(CliPlugin):
             .add_named_argument('vrf', default='default', help='network instance name', suggestions=KeyCompleter('/network-instance[name=*]')),
             callback=self._print_summary
         )
+        bgp_vrf = bgp.add_command(
+            Syntax('vrf').add_unnamed_argument('vrf_name', suggestions=KeyCompleter('/network-instance[name=*]')),
+            update_location=False
+        )
+        bgp_vrf.add_command(
+            Syntax('summary', help='BGP summary for VRF'),
+            callback=self._print_vrf_bgp_summary,
+            update_location=False
+        )
 
         # IP Route
         ip_route = ip.add_command(
@@ -420,6 +429,12 @@ class Plugin(CliPlugin):
 
     def _print_summary(self, state, arguments, output, **_kwargs):
         netinst = arguments.get('summary', 'vrf') if arguments.has_node('summary') else 'default'
+        BaseBgpReport().show_bgp_summary(state, output, network_instance=netinst)
+        output.print_line("-" * 100)
+        output.print_line(f'Try SR Linux command: show network-instance {netinst} protocols bgp neighbor')
+
+    def _print_vrf_bgp_summary(self, state, arguments, output, **_kwargs):
+        netinst = arguments.get('vrf', 'vrf_name') if arguments.has_node('vrf') else 'default'
         BaseBgpReport().show_bgp_summary(state, output, network_instance=netinst)
         output.print_line("-" * 100)
         output.print_line(f'Try SR Linux command: show network-instance {netinst} protocols bgp neighbor')

@@ -36,6 +36,7 @@ class IpRouteReport:
         'bgp-label': 'BL',
         'bgp-evpn': 'BE', 
         'bgp-vpn': 'BV',
+        'connected': 'C',
         'dhcp': 'D',
         'gribi': 'G',
         'host': 'H',
@@ -218,11 +219,17 @@ class IpRouteReport:
 
     def _get_route_code(self, route_type, route_owner):
         """Get single character code for route type"""
-        if route_type == 'host':
+        rtype = (route_type or '').lower()
+        rowner = (route_owner or '').lower()
+        if rtype == 'host':
             return 'L'
-        if route_type == 'local':
+        if rtype in ('local', 'connected') or rowner in ('local', 'connected'):
             return 'C'
-        return self.ROUTE_CODES.get(route_type.lower(), '?')
+        if rtype in self.ROUTE_CODES:
+            return self.ROUTE_CODES[rtype]
+        if rowner in self.ROUTE_CODES:
+            return self.ROUTE_CODES[rowner]
+        return '?'
 
     def _display_routes(self, output, routes, network_instance):
         """Display formatted routes"""

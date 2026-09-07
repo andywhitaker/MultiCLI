@@ -157,8 +157,8 @@ class Plugin(CliPlugin):
             schema=EthernetSwitchingReport().get_schema_instance()
         )
 
-        # 8. Route Summary: show route summary
-        route_cmd = self._add_or_override(cli.show_mode, Syntax('route', help='Show routing table'))
+        # 8. Route: show route / show route summary
+        route_cmd = self._add_or_override(cli.show_mode, Syntax('route', help='Show routing table'), callback=self._print_route)
         self._add_or_override(route_cmd, Syntax('summary', help='Show route summary in Juniper format'), callback=self._print_route_summary)
 
         # 9. BGP Summary: show bgp summary
@@ -224,6 +224,11 @@ class Plugin(CliPlugin):
         if state.is_intermediate_command:
             return
         EthernetSwitchingReport()._show_table_instance(state, output, arguments, **_kwargs)
+
+    def _print_route(self, state, output, **_kwargs):
+        if state.is_intermediate_command:
+            return
+        JunosRoutingReports().show_route(state, output)
 
     def _print_route_summary(self, state, output, **_kwargs):
         JunosRoutingReports().show_route_summary(state, output)
