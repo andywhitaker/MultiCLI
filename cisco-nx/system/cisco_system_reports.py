@@ -376,13 +376,39 @@ class CiscoSystemReports:
     def show_processes_cpu(self, state, output):
         """Display Cisco NX-OS style 'show processes cpu'."""
         lines = []
-        load1, load5, load15 = "0.00", "0.00", "0.00"
+        cpu_5sec = None
+        cpu_1min = None
+        cpu_5min = None
+
+        path_cpu = build_path('/platform/control[slot=*]/cpu[index=all]/total')
         try:
-            with open('/proc/loadavg') as f:
-                parts = f.read().split()
-                load1, load5, load15 = parts[0], parts[1], parts[2]
+            cpu_data = state.server_data_store.get_data(path_cpu, recursive=True)
+            for ctrl in cpu_data.platform.get().control.items():
+                if hasattr(ctrl, 'cpu'):
+                    for cpu_obj in ctrl.cpu.items():
+                        if hasattr(cpu_obj, 'total') and cpu_obj.total.exists():
+                            tot = cpu_obj.total.get()
+                            cpu_5sec = getattr(tot, 'instant', None)
+                            cpu_1min = getattr(tot, 'average_1', getattr(tot, 'average-1', None))
+                            cpu_5min = getattr(tot, 'average_5', getattr(tot, 'average-5', None))
+                            break
+                if cpu_5sec is not None:
+                    break
         except Exception:
             pass
+
+        if cpu_5sec is None or cpu_1min is None or cpu_5min is None:
+            try:
+                with open('/proc/loadavg') as f:
+                    parts = f.read().split()
+                    load1, load5 = parts[0], parts[1]
+                    cpu_5sec = cpu_5sec if cpu_5sec is not None else load1
+                    cpu_1min = cpu_1min if cpu_1min is not None else load1
+                    cpu_5min = cpu_5min if cpu_5min is not None else load5
+            except Exception:
+                cpu_5sec = cpu_5sec or "0"
+                cpu_1min = cpu_1min or "0"
+                cpu_5min = cpu_5min or "0"
 
         lines.append(f"{'PID':<6} {'Runtime(ms)':<13} {'Invoked':<12} {'uSecs':<6} {'1Sec':<6} {'Process'}")
         lines.append(f"-----  ------------  -----------  -----  -----  -----------------")
@@ -408,7 +434,7 @@ class CiscoSystemReports:
             pass
 
         lines.append("")
-        lines.append(f"CPU utilization for five seconds: {load1}%; one minute: {load1}%; five minutes: {load5}%")
+        lines.append(f"CPU utilization for five seconds: {cpu_5sec}%; one minute: {cpu_1min}%; five minutes: {cpu_5min}%")
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")

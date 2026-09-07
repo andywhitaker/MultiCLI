@@ -83,8 +83,8 @@ esac
 echo "==> Configuring node '$TARGET_NODE' with $NOS_NAME persona..."
 
 if [ "$USE_DOCKER_CP" = true ]; then
-    # Clean in container
-    docker exec "$TARGET_NODE" bash -c 'rm -rf /etc/opt/srlinux/cli/* && mkdir -p /etc/opt/srlinux/cli/plugins'
+    # Clean in container (selective removal of multicli components)
+    docker exec "$TARGET_NODE" bash -c 'rm -rf /etc/opt/srlinux/cli/plugins/* /etc/opt/srlinux/cli/{system,routing,interface,ip,mac,eth_switch,bgp,README.md} 2>/dev/null || true; mkdir -p /etc/opt/srlinux/cli/plugins'
     # Copy files into container
     docker cp "$SOURCE_DIR"/. "$TARGET_NODE":/etc/opt/srlinux/cli/
     echo "==> Successfully installed $NOS_NAME to $TARGET_NODE via docker cp."

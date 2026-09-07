@@ -22,6 +22,8 @@ def format_arista_intf(name, short=False):
     if not name:
         return ""
     name = str(name)
+    if name.endswith('.0'):
+        name = name[:-2]
     if name.startswith('ethernet-'):
         num = name.replace('ethernet-', '')
         return f"Et{num}" if short else f"Ethernet{num}"
@@ -31,11 +33,13 @@ def format_arista_intf(name, short=False):
     if name.startswith('lag'):
         num = name.replace('lag', '')
         return f"Po{num}" if short else f"Port-Channel{num}"
-    if name.startswith('lo'):
-        num = name.replace('lo', '')
+    if name.startswith(('lo', 'system')):
+        num = name.replace('system', '').replace('lo', '') or '0'
         return f"Lo{num}" if short else f"Loopback{num}"
     if name.startswith('irb'):
         num = name.replace('irb', '')
+        if '.' in num:
+            num = num.split('.', 1)[1]
         return f"Vlan{num}"
     return name
 
@@ -72,36 +76,68 @@ class AristaRoutingReports:
         ]
 
         routes = []
-        path = build_path('/network-instance[name={name}]/route-table/ipv4-unicast/route[ipv4-prefix=*]', name=vrf)
+        nh_map = {}
+        nhg_map = {}
+
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
-            for r in data.get_descendants('/network-instance/route-table/ipv4-unicast/route'):
+            rt_path = build_path('/network-instance[name={name}]/route-table', name=vrf)
+            rt_data = state.server_data_store.get_data(rt_path, recursive=True)
+
+            # Build next-hop index to IP/interface mapping
+            for nh in rt_data.get_descendants('/network-instance/route-table/next-hop'):
+                nh_idx = getattr(nh, 'index', None)
+                if nh_idx is not None:
+                    ip = getattr(nh, 'ip_address', None)
+                    subif = getattr(nh, 'subinterface', None)
+                    nh_map[str(nh_idx)] = {
+                        'ip': str(ip) if ip else None,
+                        'interface': str(subif) if subif else None
+                    }
+
+            # Build next-hop group mapping
+            for nhg in rt_data.get_descendants('/network-instance/route-table/next-hop-group'):
+                nhg_idx = getattr(nhg, 'index', None)
+                if nhg_idx is not None and hasattr(nhg, 'next_hop'):
+                    hops = []
+                    for nh_item in nhg.next_hop.items():
+                        target_nh = getattr(nh_item, 'next_hop', None)
+                        if target_nh is not None and str(target_nh) in nh_map:
+                            hops.append(nh_map[str(target_nh)])
+                    nhg_map[str(nhg_idx)] = hops
+
+            for r in rt_data.get_descendants('/network-instance/route-table/ipv4-unicast/route'):
                 pfx = getattr(r, 'ipv4_prefix', None)
                 if not pfx:
                     continue
-                owner = getattr(r, 'route_owner', getattr(r, 'route_type', 'connected'))
-                owner_str = str(owner).lower()
-                if 'connected' in owner_str or 'direct' in owner_str:
+                rtype = str(getattr(r, 'route_type', '')).lower()
+                rowner = str(getattr(r, 'route_owner', '')).lower()
+
+                if 'connected' in rowner or 'direct' in rowner or rtype in ('local', 'connected'):
                     code = ' C   '
-                elif 'local' in owner_str or 'host' in owner_str:
+                elif 'host' in rtype or 'local' in rowner:
                     code = ' L   '
-                elif 'bgp' in owner_str:
+                elif 'bgp' in rowner or 'bgp' in rtype:
                     code = ' B I '
-                elif 'ospf' in owner_str:
+                elif 'ospf' in rowner or 'ospf' in rtype:
                     code = ' O   '
-                elif 'isis' in owner_str:
+                elif 'isis' in rowner or 'isis' in rtype:
                     code = ' I L2'
                 else:
                     code = ' S   '
+
                 metric = getattr(r, 'metric', 0)
                 pref = getattr(r, 'preference', 0)
+                nhg_id = getattr(r, 'next_hop_group', None)
+                route_hops = nhg_map.get(str(nhg_id), [])
 
                 routes.append({
                     'prefix': pfx,
                     'code': code,
                     'pref': pref,
                     'metric': metric,
-                    'owner': owner_str
+                    'owner': rowner,
+                    'type': rtype,
+                    'hops': route_hops
                 })
         except Exception:
             pass
@@ -119,10 +155,21 @@ class AristaRoutingReports:
             sorted_routes = routes
 
         for r in sorted_routes:
-            if 'connected' in r['owner'] or 'direct' in r['owner'] or 'local' in r['owner']:
-                lines.append(f"{r['code']:<5} {r['prefix']} is directly connected")
+            hops = r.get('hops', [])
+            is_conn = ('C' in r['code'] or 'L' in r['code'])
+            if is_conn:
+                if hops and hops[0].get('interface'):
+                    disp_intf = format_arista_intf(hops[0]['interface'], short=False)
+                    lines.append(f"{r['code']:<5} {r['prefix']} is directly connected, {disp_intf}")
+                else:
+                    lines.append(f"{r['code']:<5} {r['prefix']} is directly connected")
             else:
-                lines.append(f"{r['code']:<5} {r['prefix']} [{r['pref']}/{r['metric']}]")
+                if hops and hops[0].get('ip'):
+                    nh_ip = hops[0]['ip']
+                    nh_intf = f", {format_arista_intf(hops[0]['interface'], short=False)}" if hops[0].get('interface') else ""
+                    lines.append(f"{r['code']:<5} {r['prefix']} [{r['pref']}/{r['metric']}] via {nh_ip}{nh_intf}")
+                else:
+                    lines.append(f"{r['code']:<5} {r['prefix']} [{r['pref']}/{r['metric']}]")
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")

@@ -361,6 +361,8 @@ class Plugin(CliPlugin):
         AristaSystemReports().show_inventory(state, output)
 
     def _print_environment_all(self, state, output, **_kwargs):
+        if state.is_intermediate_command:
+            return
         AristaSystemReports().show_environment(state, output, 'all')
 
     def _print_environment_cooling(self, state, output, **_kwargs):
@@ -373,6 +375,8 @@ class Plugin(CliPlugin):
         AristaSystemReports().show_environment(state, output, 'temperature')
 
     def _print_ip_route(self, state, output, **_kwargs):
+        if state.is_intermediate_command:
+            return
         AristaRoutingReports().show_ip_route(state, output, vrf='default')
 
     def _print_vrf_route(self, state, arguments, output, **_kwargs):
@@ -395,6 +399,8 @@ class Plugin(CliPlugin):
         AristaRoutingReports().show_isis_neighbors(state, output)
 
     def _print_lldp_neighbors(self, state, output, **_kwargs):
+        if state.is_intermediate_command:
+            return
         AristaInterfaceReports().show_lldp_neighbors(state, output, detail=False)
 
     def _print_lldp_neighbors_detail(self, state, output, **_kwargs):

@@ -11,6 +11,20 @@ import datetime
 import ipaddress
 from srlinux.schema import FixedSchemaRoot
 
+try:
+    from cisco_interface_reports import format_cisco_intf
+except ImportError:
+    def format_cisco_intf(name, short=True):
+        if not name:
+            return ""
+        name = str(name).strip()
+        if name.endswith('.0'):
+            name = name[:-2]
+        if name.startswith('ethernet-'):
+            num = name.split('-', 1)[1]
+            return f"Eth{num}" if short else f"Ethernet{num}"
+        return name
+
 class IpRouteReport:
     """Handles the 'ip route' command functionality."""
     
@@ -244,7 +258,8 @@ class IpRouteReport:
             nh_ip = default_route['next_hops'][0].get('ip', 'unknown')
             print(f"Gateway of last resort is {nh_ip} to network 0.0.0.0\n")
         elif default_route and default_route.get('interface'):
-            print(f"Gateway of last resort is {default_route['interface']} to network 0.0.0.0\n")
+            intf_disp = format_cisco_intf(default_route['interface'], short=True)
+            print(f"Gateway of last resort is {intf_disp} to network 0.0.0.0\n")
         else:
             print("Gateway of last resort is not set\n")
 
@@ -254,7 +269,8 @@ class IpRouteReport:
     def _display_route(self, route):
         """Display a single route entry"""
         if route['interface']:
-            print(f"{route['code']}    {route['prefix']} is directly connected, {route['interface']}")
+            intf_disp = format_cisco_intf(route['interface'], short=True)
+            print(f"{route['code']}    {route['prefix']} is directly connected, {intf_disp}")
         elif route['code'] == 'L':
             print(f"{route['code']}    {route['prefix']} is directly connected")
         elif not route['next_hops']:
@@ -286,6 +302,7 @@ class IpRouteReport:
         if route['uptime']:
             line += f", {route['uptime']}"
         if next_hop['interface']:
-            line += f", {next_hop['interface']}"
+            intf_disp = format_cisco_intf(next_hop['interface'], short=True)
+            line += f", {intf_disp}"
             
         print(line)

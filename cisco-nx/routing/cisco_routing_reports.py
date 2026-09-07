@@ -4,6 +4,7 @@
 # Copyright (c) 2025-2026 Nokia
 ###########################################################################
 
+import datetime
 import re
 from srlinux.location import build_path
 from cisco_interface_reports import format_cisco_intf
@@ -93,13 +94,36 @@ class CiscoRoutingReports:
                         if hasattr(sub, 'ipv4') and sub.ipv4.exists():
                             arp = getattr(sub.ipv4.get(), 'arp', None)
                             if arp and hasattr(arp.get(), 'neighbor'):
-                                for n in arp.get().neighbor.items():
+                                arp_node = arp.get()
+                                timeout_val = getattr(arp_node, 'timeout', 14400) or 14400
+                                for n in arp_node.neighbor.items():
                                     found = True
                                     ip = n.ipv4_address
                                     mac = format_mac_cisco(getattr(n, 'link_layer_address', ''))
-                                    full_intf = f"{intf.name}.{sub.index}"
+                                    full_intf = f"{intf.name}.{sub.index}" if str(sub.index) != '0' else intf.name
                                     c_intf = format_cisco_intf(full_intf, short=True)
-                                    lines.append(f"{ip:<16} {'--':<9} {mac:<17} {c_intf}")
+
+                                    age_str = "--"
+                                    origin = getattr(n, 'origin', '')
+                                    exp_time = getattr(n, 'expiration_time', None)
+                                    if exp_time and origin != 'static':
+                                        try:
+                                            ts_str = str(exp_time).split('(')[0].strip()
+                                            if ts_str.endswith('Z'):
+                                                ts_str = ts_str[:-1] + '+00:00'
+                                            exp_dt = datetime.datetime.fromisoformat(ts_str)
+                                            now = datetime.datetime.now(datetime.timezone.utc)
+                                            rem_seconds = (exp_dt - now).total_seconds()
+                                            age_sec = max(0, int(timeout_val - rem_seconds))
+                                            h, r = divmod(age_sec, 3600)
+                                            m, s = divmod(r, 60)
+                                            age_str = f"{h:02d}:{m:02d}:{s:02d}"
+                                        except Exception:
+                                            age_str = "00:00:00"
+                                    elif origin == 'dynamic':
+                                        age_str = "00:00:00"
+
+                                    lines.append(f"{ip:<16} {age_str:<9} {mac:<17} {c_intf}")
         except Exception:
             pass
 
@@ -113,7 +137,10 @@ class CiscoRoutingReports:
                             found = True
                             ip = n.ipv4_address
                             mac = format_mac_cisco(getattr(n, 'link_layer_address', ''))
-                            intf = format_cisco_intf(getattr(n, 'interface', ''), short=True)
+                            intf_name = getattr(n, 'interface', '')
+                            if intf_name.endswith('.0'):
+                                intf_name = intf_name[:-2]
+                            intf = format_cisco_intf(intf_name, short=True)
                             lines.append(f"{ip:<16} {'--':<9} {mac:<17} {intf}")
             except Exception:
                 pass

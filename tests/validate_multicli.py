@@ -50,6 +50,14 @@ TEST_SUITES = {
         "negative_assertions": [
             ("show mlag", "state: Active", "show mlag should not output hardcoded 'state: Active' when no MLAG is configured"),
             ("show port-channel summary", "LACP(a)", "show port-channel summary should not hardcode LACP(a) when no LAG is configured"),
+            ("show environment cooling", "System Temperature", "show environment cooling should not trigger intermediate show environment all"),
+            ("show environment power", "System Temperature", "show environment power should not trigger intermediate show environment all"),
+            ("show lldp neighbors detail", "Last table change time", "show lldp neighbors detail should not trigger intermediate show lldp neighbors summary"),
+            ("show ip route", "S       10.1.10.0/24", "Local/connected subnet should be classified as C or L, not S"),
+        ],
+        "positive_assertions": [
+            ("show ip route", "Gateway of last resort", "show ip route must contain Gateway of last resort header"),
+            ("show ip arp", "Age (min)", "show ip arp must contain Age (min) column"),
         ]
     },
     "Cisco NX-OS": {
@@ -100,6 +108,11 @@ TEST_SUITES = {
         "negative_assertions": [
             ("show vpc", "peer-link is up", "show vpc should not output hardcoded 'peer-link is up' when no VPC/ES is configured"),
             ("show nve peers", "state: Up", "show nve peers should not output hardcoded 'state: Up' when no NVE peer is present"),
+            ("show ip route", "ethernet-1/1.0", "show ip route should format interface as Eth1/1 rather than ethernet-1/1.0"),
+        ],
+        "positive_assertions": [
+            ("show processes cpu", "CPU utilization for five seconds:", "show processes cpu must contain CPU utilization summary"),
+            ("show ip arp", "MAC Address", "show ip arp must contain MAC Address header"),
         ]
     },
     "Juniper JUNOS": {
@@ -165,6 +178,7 @@ def validate(args):
         node = getattr(args, suite["arg_key"], suite["default_node"])
         commands = suite["commands"]
         neg_assertions = dict(((c, p), msg) for c, p, msg in suite.get("negative_assertions", []))
+        pos_assertions = dict(((c, p), msg) for c, p, msg in suite.get("positive_assertions", []))
         print(f"\n--- Running {suite_name} on container '{node}' ({len(commands)} commands) ---")
 
         for idx, cmd in enumerate(commands, 1):
@@ -186,6 +200,11 @@ def validate(args):
             for (neg_cmd, bad_pattern), failure_msg in neg_assertions.items():
                 if cmd == neg_cmd and bad_pattern in stdout:
                     errors.append(f"Assertion failed: {failure_msg} (found '{bad_pattern}')")
+
+            # Positive assertions: ensure expected dynamic content is present
+            for (pos_cmd, req_pattern), failure_msg in pos_assertions.items():
+                if cmd == pos_cmd and req_pattern not in stdout:
+                    errors.append(f"Assertion failed: {failure_msg} (missing '{req_pattern}')")
 
             if errors:
                 total_failed += 1

@@ -12,13 +12,16 @@ def format_cisco_intf(name, short=True):
     if not name:
         return "-"
     name = str(name).strip()
+    if name.endswith('.0'):
+        name = name[:-2]
     if name.startswith('ethernet-'):
         num = name.split('-', 1)[1]
         return f"Eth{num}" if short else f"Ethernet{num}"
     elif name.startswith('mgmt'):
         return name
-    elif name.startswith('system0'):
-        return "Lo0" if short else "Loopback0"
+    elif name.startswith('system0') or name.startswith('system'):
+        num = name.replace('system', '') or '0'
+        return f"Lo{num}" if short else f"Loopback{num}"
     elif name.startswith('lo'):
         num = name[2:]
         return f"Lo{num}" if short else f"Loopback{num}"
@@ -563,7 +566,7 @@ class CiscoInterfaceReports:
                 if hasattr(intf, 'subinterface'):
                     for sub in intf.subinterface.items():
                         full_name = f"{name}.{sub.index}"
-                        sub_disp = f"{disp_port}.{sub.index}" if sub.index != 0 else disp_port
+                        sub_disp = f"{disp_port}.{sub.index}" if str(sub.index) != '0' else disp_port
                         sub_vrf = intf_to_vrf.get(full_name, intf_to_vrf.get(name, "default"))
                         if hasattr(sub, 'ipv6') and sub.ipv6.exists():
                             for a in sub.ipv6.get().address.items():

@@ -22,6 +22,8 @@ def format_arista_intf(name, short=False):
     if not name:
         return ""
     name = str(name)
+    if name.endswith('.0'):
+        name = name[:-2]
     if name.startswith('ethernet-'):
         num = name.replace('ethernet-', '')
         return f"Et{num}" if short else f"Ethernet{num}"
@@ -118,7 +120,7 @@ class AristaInterfaceReports:
                                         break
 
                         sub_mtu = getattr(sub, 'ip_mtu', None) or mtu_val
-                        sub_name = f"{intf_name}.{sub.index}" if sub.index != 0 else intf_name
+                        sub_name = f"{intf_name}.{sub.index}" if str(sub.index) != '0' else intf_name
                         display_name = format_arista_intf(sub_name, short=False)
                         rows.append({
                             'display_name': display_name,
@@ -296,12 +298,33 @@ class AristaInterfaceReports:
                         if hasattr(sub, 'ipv4') and sub.ipv4.exists():
                             arp_container = getattr(sub.ipv4.get(), 'arp', None)
                             if arp_container and hasattr(arp_container.get(), 'neighbor'):
-                                for n in arp_container.get().neighbor.items():
+                                arp_node = arp_container.get()
+                                timeout_val = getattr(arp_node, 'timeout', 14400) or 14400
+                                for n in arp_node.neighbor.items():
                                     ip_addr = getattr(n, 'ipv4_address', '')
                                     mac = format_mac_cisco_arista(getattr(n, 'link_layer_address', ''))
-                                    full_intf = f"{intf.name}.{sub.index}"
+                                    full_intf = f"{intf.name}.{sub.index}" if str(sub.index) != '0' else intf.name
                                     disp_intf = format_arista_intf(full_intf, short=False)
-                                    lines.append(f"{ip_addr:<15} {'0':<11} {mac:<16} {disp_intf}")
+                                    
+                                    age_str = "-"
+                                    origin = getattr(n, 'origin', '')
+                                    exp_time = getattr(n, 'expiration_time', None)
+                                    if exp_time and origin != 'static':
+                                        try:
+                                            ts_str = str(exp_time).split('(')[0].strip()
+                                            if ts_str.endswith('Z'):
+                                                ts_str = ts_str[:-1] + '+00:00'
+                                            exp_dt = datetime.datetime.fromisoformat(ts_str)
+                                            now = datetime.datetime.now(datetime.timezone.utc)
+                                            rem_seconds = (exp_dt - now).total_seconds()
+                                            age_sec = max(0, int(timeout_val - rem_seconds))
+                                            age_str = str(age_sec // 60)
+                                        except Exception:
+                                            age_str = "0"
+                                    elif origin == 'dynamic':
+                                        age_str = "0"
+
+                                    lines.append(f"{ip_addr:<15} {age_str:<11} {mac:<16} {disp_intf}")
         except Exception:
             pass
 
