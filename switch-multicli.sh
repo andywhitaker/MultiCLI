@@ -10,15 +10,43 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_NOS="${1:-}"
 TARGET_NODE="${2:-leaf1}"
+DEFAULT_PERSONA=""
+
+# Parse optional --default flag
+shift 2 2>/dev/null || true
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --default|-d)
+            DEFAULT_PERSONA="${2:-}"
+            shift 2 2>/dev/null || shift 1
+            ;;
+        *)
+            shift 1
+            ;;
+    esac
+done
 
 if [ -z "$TARGET_NOS" ]; then
-    echo "Usage: $0 <arista|cisco|juniper> [node_name (default: leaf1)]"
+    echo "Usage: $0 <all|arista|cisco|juniper|comma-separated> [node_name (default: leaf1)] [--default <arista|cisco|juniper|none>]"
     echo ""
     echo "Examples:"
-    echo "  $0 arista leaf1      # Sets leaf1 to Arista EOS"
-    echo "  $0 cisco leaf1       # Sets leaf1 to Cisco NX-OS"
-    echo "  $0 juniper leaf1     # Sets leaf1 to Juniper JUNOS"
+    echo "  $0 all leaf1                 # Installs all submodes on leaf1 with default persona (arista)"
+    echo "  $0 all leaf2                 # Installs all submodes on leaf2 with default persona (cisco)"
+    echo "  $0 all leaf3                 # Installs all submodes on leaf3 with default persona (juniper)"
+    echo "  $0 arista leaf1              # Installs only Arista EOS on leaf1"
+    echo "  $0 cisco leaf2               # Installs only Cisco NX-OS on leaf2"
+    echo "  $0 eos,nxos leaf1            # Installs Arista EOS and Cisco NX-OS on leaf1"
     exit 1
+fi
+
+# Infer default persona if not explicitly passed
+if [ -z "$DEFAULT_PERSONA" ]; then
+    case "$TARGET_NODE" in
+        *leaf1*) DEFAULT_PERSONA="arista" ;;
+        *leaf2*) DEFAULT_PERSONA="cisco" ;;
+        *leaf3*) DEFAULT_PERSONA="juniper" ;;
+        *) DEFAULT_PERSONA="arista" ;;
+    esac
 fi
 
 # Determine target directory or docker mode
@@ -61,43 +89,50 @@ if [ -z "$TARGET_CLI_DIR" ]; then
     fi
 fi
 
-case "$TARGET_NOS" in
-    arista|eos)
-        SOURCE_DIR="$SCRIPT_DIR/arista"
-        NOS_NAME="Arista EOS"
-        ;;
-    cisco|cisco-nx|nxos)
-        SOURCE_DIR="$SCRIPT_DIR/cisco-nx"
-        NOS_NAME="Cisco NX-OS"
-        ;;
-    juniper|junos)
-        SOURCE_DIR="$SCRIPT_DIR/juniper"
-        NOS_NAME="Juniper JUNOS"
-        ;;
-    *)
-        echo "Error: Unknown NOS '$TARGET_NOS'. Choose 'arista', 'cisco', or 'juniper'."
-        exit 1
-        ;;
-esac
+# Parse target NOS list
+VENDORS=()
+IFS=',' read -ra ADDR <<< "$TARGET_NOS"
+for part in "${ADDR[@]}"; do
+    case "$part" in
+        all|multicli)
+            VENDORS=("arista" "cisco-nx" "juniper")
+            break
+            ;;
+        arista|eos)
+            VENDORS+=("arista")
+            ;;
+        cisco|cisco-nx|nxos)
+            VENDORS+=("cisco-nx")
+            ;;
+        juniper|junos)
+            VENDORS+=("juniper")
+            ;;
+        *)
+            echo "Error: Unknown NOS '$part'. Choose 'all', 'arista', 'cisco', or 'juniper'."
+            exit 1
+            ;;
+    esac
+done
 
-echo "==> Configuring node '$TARGET_NODE' with $NOS_NAME persona..."
+echo "==> Configuring node '$TARGET_NODE' with MultiCLI [${VENDORS[*]}] (default persona: $DEFAULT_PERSONA)..."
 
 if [ "$USE_DOCKER_CP" = true ]; then
-    # Clean in container (selective removal of MultiCLI components and legacy plugins)
     docker exec "$TARGET_NODE" bash -c 'rm -rf /etc/opt/srlinux/cli/plugins/{main_{arista,cisco,juniper}.py,ip_reports.py,mac_reports.py,Cisco_nxos_lldp_neighbor,ethernet_switching_reports.py,show_interfaces.py} /etc/opt/srlinux/cli/{system,routing,interface,ip,mac,eth_switch,bgp,README.md} 2>/dev/null || true; find /etc/opt/srlinux/cli -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true; mkdir -p /etc/opt/srlinux/cli/plugins'
-    # Copy files into container
-    docker cp "$SOURCE_DIR"/. "$TARGET_NODE":/etc/opt/srlinux/cli/
-    echo "==> Successfully installed $NOS_NAME to $TARGET_NODE via docker cp."
+    for v in "${VENDORS[@]}"; do
+        docker cp "$SCRIPT_DIR/$v"/. "$TARGET_NODE":/etc/opt/srlinux/cli/
+    done
+    docker exec "$TARGET_NODE" bash -c "echo '$DEFAULT_PERSONA' > /etc/opt/srlinux/cli/default_persona"
+    echo "==> Successfully installed [${VENDORS[*]}] to $TARGET_NODE via docker cp."
 else
-    # Clean existing MultiCLI components and legacy plugins in target node config/cli
     mkdir -p "$TARGET_CLI_DIR"/plugins
     rm -rf "$TARGET_CLI_DIR"/plugins/main_{arista,cisco,juniper}.py "$TARGET_CLI_DIR"/plugins/{ip_reports.py,mac_reports.py,Cisco_nxos_lldp_neighbor,ethernet_switching_reports.py,show_interfaces.py} "$TARGET_CLI_DIR"/system "$TARGET_CLI_DIR"/routing "$TARGET_CLI_DIR"/interface "$TARGET_CLI_DIR"/ip "$TARGET_CLI_DIR"/mac "$TARGET_CLI_DIR"/eth_switch "$TARGET_CLI_DIR"/bgp "$TARGET_CLI_DIR"/README.md 2>/dev/null || true
     find "$TARGET_CLI_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
     mkdir -p "$TARGET_CLI_DIR"/plugins
-
-    # Copy vendor suite
-    cp -r "$SOURCE_DIR"/* "$TARGET_CLI_DIR"/
-    echo "==> Successfully installed $NOS_NAME to $TARGET_NODE ($TARGET_CLI_DIR)."
+    for v in "${VENDORS[@]}"; do
+        cp -r "$SCRIPT_DIR/$v"/* "$TARGET_CLI_DIR"/
+    done
+    echo "$DEFAULT_PERSONA" > "$TARGET_CLI_DIR"/default_persona
+    echo "==> Successfully installed [${VENDORS[*]}] to $TARGET_NODE ($TARGET_CLI_DIR)."
 fi
 
 echo "==> Test now with: docker exec -it $TARGET_NODE sr_cli"

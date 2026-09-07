@@ -47,109 +47,173 @@ from junos_routing_reports import JunosRoutingReports
 from ethernet_switching_table_report import EthernetSwitchingReport
 from show_interfaces import JperInterfaceSummary, JperInterfaceBrief, JperInterfaceTerse
 
+from srlinux.mgmt.cli.lazy_loader_utils import wait_for_show_reports_load
+from srlinux.mgmt.cli.cli_mode import CliMode
+from srlinux.mgmt.cli.cli_state import CliState
+from srlinux.schema.data_store import DataStore
+
+_active_data_store_override = None
+
+_orig_is_intermediate = getattr(CliState, '_orig_multicli_is_intermediate', None)
+if _orig_is_intermediate is None:
+    _orig_is_intermediate = CliState.is_intermediate_command.fget
+    CliState._orig_multicli_is_intermediate = _orig_is_intermediate
+
+    def _multicli_is_intermediate(self):
+        first_cmd = self.first_regular_command_name
+        if first_cmd in ['eos', 'nxos', 'junos']:
+            return not self.is_last_command
+        return _orig_is_intermediate(self)
+
+    CliState.is_intermediate_command = property(_multicli_is_intermediate)
+
+_orig_server_data_store = getattr(CliState, '_orig_multicli_server_data_store', None)
+if _orig_server_data_store is None:
+    _orig_server_data_store = CliState.server_data_store.fget
+    CliState._orig_multicli_server_data_store = _orig_server_data_store
+
+    def _multicli_server_data_store(self):
+        global _active_data_store_override
+        if _active_data_store_override is not None:
+            return _active_data_store_override
+        return _orig_server_data_store(self)
+
+    CliState.server_data_store = property(_multicli_server_data_store)
+
+def _enter_submode(state, arguments):
+    if state.is_last_command:
+        state.location = arguments
+
+def should_register_show_mode(persona_name):
+    config_file = '/etc/opt/srlinux/cli/default_persona'
+    if os.path.exists(config_file):
+        try:
+            with open(config_file) as f:
+                pref = f.read().strip().lower()
+                if pref == 'none':
+                    return False
+                if pref in [persona_name, persona_name.replace('-', ''), 'all']:
+                    return True
+                return False
+        except Exception:
+            pass
+    return True
+
 class Plugin(CliPlugin):
 
-    def get_required_plugins(self):
-        return [
-            RequiredPlugin('version', module='srlinux'),
-        ]
+    def _get_child(self, parent, name):
+        if hasattr(parent, 'get_command_or_none'):
+            return parent.get_command_or_none(name)
+        elif hasattr(parent, 'root'):
+            return parent.root.get_command_or_none(name)
+        return None
+
+    def _wrap_callback(self, callback):
+        if not callback:
+            return None
+        def wrapped(state, *args, **kwargs):
+            if state.is_intermediate_command:
+                return
+            global _active_data_store_override
+            _active_data_store_override = state.server.get_data_store(DataStore.State)
+            try:
+                return callback(state, *args, **kwargs)
+            finally:
+                _active_data_store_override = None
+        return wrapped
 
     def _add_or_override(self, parent, syntax, callback=None, schema=None, update_location=False):
-        if hasattr(parent, 'get_command_or_none'):
-            node = parent.get_command_or_none(syntax.name)
-        elif hasattr(parent, 'root'):
-            node = parent.root.get_command_or_none(syntax.name)
-        else:
-            node = None
-
+        node = self._get_child(parent, syntax.name)
         if node:
             if callback:
-                node.set_callback(callback)
+                node.set_callback(self._wrap_callback(callback))
             return node
-        kwargs = {}
+        kwargs = {'update_location': update_location}
         if callback is not None:
-            kwargs['callback'] = callback
+            kwargs['callback'] = self._wrap_callback(callback)
         if schema is not None:
             kwargs['schema'] = schema
-        if update_location:
-            kwargs['update_location'] = update_location
         return parent.add_command(syntax, **kwargs)
 
-    def load(self, cli, **_kwargs):
+    def _register_all_commands(self, target):
         # 1. System Commands: show version, show system uptime, show chassis hardware
-        self._add_or_override(cli.show_mode, Syntax('version', help='Show system version in Juniper JUNOS format'), callback=self._print_version)
+        self._add_or_override(target, Syntax('version', help='Show system version in Juniper JUNOS format'), callback=self._print_version, update_location=False)
 
-        sys_cmd = self._add_or_override(cli.show_mode, Syntax('system', help='Show system information in Juniper format'))
-        self._add_or_override(sys_cmd, Syntax('uptime', help='Show system uptime in Juniper format'), callback=self._print_system_uptime)
-        proc_cmd = self._add_or_override(sys_cmd, Syntax('processes', help='Show system processes in Juniper format'), callback=self._print_system_processes)
-        self._add_or_override(proc_cmd, Syntax('summary', help='Show system processes summary'), callback=self._print_system_processes_summary)
-        self._add_or_override(proc_cmd, Syntax('brief', help='Show system processes brief'), callback=self._print_system_processes)
-        self._add_or_override(proc_cmd, Syntax('extensive', help='Show system processes extensive'), callback=self._print_system_processes)
+        sys_cmd = self._add_or_override(target, Syntax('system', help='Show system information in Juniper format'), update_location=False)
+        self._add_or_override(sys_cmd, Syntax('uptime', help='Show system uptime in Juniper format'), callback=self._print_system_uptime, update_location=False)
+        proc_cmd = self._add_or_override(sys_cmd, Syntax('processes', help='Show system processes in Juniper format'), callback=self._print_system_processes, update_location=False)
+        self._add_or_override(proc_cmd, Syntax('summary', help='Show system processes summary'), callback=self._print_system_processes_summary, update_location=False)
+        self._add_or_override(proc_cmd, Syntax('brief', help='Show system processes brief'), callback=self._print_system_processes, update_location=False)
+        self._add_or_override(proc_cmd, Syntax('extensive', help='Show system processes extensive'), callback=self._print_system_processes, update_location=False)
 
-        chassis_cmd = self._add_or_override(cli.show_mode, Syntax('chassis', help='Show chassis information in Juniper format'))
-        self._add_or_override(chassis_cmd, Syntax('hardware', help='Show chassis hardware in Juniper format'), callback=self._print_chassis_hardware)
+        chassis_cmd = self._add_or_override(target, Syntax('chassis', help='Show chassis information in Juniper format'), update_location=False)
+        self._add_or_override(chassis_cmd, Syntax('hardware', help='Show chassis hardware in Juniper format'), callback=self._print_chassis_hardware, update_location=False)
 
         # 2. Interfaces: show interfaces, show interfaces brief, show interfaces terse
         intfs = self._add_or_override(
-            cli.show_mode,
+            target,
             JperInterfaceSummary.get_syntax(),
             callback=self._interface_summary,
             schema=JperInterfaceSummary.get_data_schema(),
-            update_location=True
+            update_location=False
         )
         self._add_or_override(
             intfs,
             JperInterfaceBrief.get_syntax(),
             callback=self._interface_brief,
             schema=JperInterfaceBrief.get_data_schema(),
-            update_location=True
+            update_location=False
         )
         self._add_or_override(
             intfs,
             JperInterfaceTerse.get_syntax(),
             callback=self._interface_terse,
             schema=JperInterfaceTerse.get_data_schema(),
-            update_location=True
+            update_location=False
         )
 
         # 3. ARP: show arp, show arp no-resolve
-        arp_cmd = self._add_or_override(cli.show_mode, Syntax('arp', help='Show ARP table in Juniper format'), callback=self._print_arp)
-        self._add_or_override(arp_cmd, Syntax('no-resolve', help='Show ARP table without resolving DNS'), callback=self._print_arp)
+        arp_cmd = self._add_or_override(target, Syntax('arp', help='Show ARP table in Juniper format'), callback=self._print_arp, update_location=False)
+        self._add_or_override(arp_cmd, Syntax('no-resolve', help='Show ARP table without resolving DNS'), callback=self._print_arp, update_location=False)
 
         # 4. LLDP: show lldp neighbors
-        lldp_node = self._add_or_override(cli.show_mode, Syntax('lldp', help='Show LLDP information'))
-        self._add_or_override(lldp_node, Syntax('neighbors', help='Show LLDP neighbors in Juniper format'), callback=self._print_lldp_neighbors)
+        lldp_node = self._add_or_override(target, Syntax('lldp', help='Show LLDP information'), update_location=False)
+        self._add_or_override(lldp_node, Syntax('neighbors', help='Show LLDP neighbors in Juniper format'), callback=self._print_lldp_neighbors, update_location=False)
 
         # 5. VLANs: show vlans
-        self._add_or_override(cli.show_mode, Syntax('vlans', help='Show VLANs in Juniper format'), callback=self._print_vlans)
+        self._add_or_override(target, Syntax('vlans', help='Show VLANs in Juniper format'), callback=self._print_vlans, update_location=False)
 
         # 6. LACP: show lacp interfaces
-        lacp_node = self._add_or_override(cli.show_mode, Syntax('lacp', help='Show LACP information'))
-        self._add_or_override(lacp_node, Syntax('interfaces', help='Show LACP aggregated interfaces in Juniper format'), callback=self._print_lacp_interfaces)
+        lacp_node = self._add_or_override(target, Syntax('lacp', help='Show LACP information'), update_location=False)
+        self._add_or_override(lacp_node, Syntax('interfaces', help='Show LACP aggregated interfaces in Juniper format'), callback=self._print_lacp_interfaces, update_location=False)
 
         # 7. Ethernet-Switching: show ethernet-switching table
-        eth_switch = self._add_or_override(cli.show_mode, Syntax('ethernet-switching', help='Show ethernet switching information'))
+        eth_switch = self._add_or_override(target, Syntax('ethernet-switching', help='Show ethernet switching information'), update_location=False)
         eth_switch_table = self._add_or_override(
             eth_switch,
             Syntax('table', help='Show media access control table'),
             callback=self._show_ethernet_switching_table,
-            schema=EthernetSwitchingReport().get_schema_instance()
+            schema=EthernetSwitchingReport().get_schema_instance(),
+            update_location=False
         )
-        eth_switch_table.add_command(
+        self._add_or_override(
+            eth_switch_table,
             Syntax('instance', help='Display information for a specified network-instance')
             .add_unnamed_argument('name', suggestions=KeyCompleter('/network-instance[name=*]')),
             callback=self._show_ethernet_switching_table,
             update_location=False,
             schema=EthernetSwitchingReport().get_schema_instance()
         )
-        eth_switch_table.add_command(
+        self._add_or_override(
+            eth_switch_table,
             Syntax('vlan', help='Display MAC address learned on a specified VLAN')
             .add_unnamed_argument('value', suggestions=MultipleKeyCompleters(keycompleters=[KeyCompleter(path="/interface[name=*]/subinterface[index=*]/vlan/encap/single-tagged-range/low-vlan-id[range-low-vlan-id=*]"), KeyCompleter(path="/interface[name=*]/subinterface[index=*]/vlan/encap/single-tagged/vlan-id:")])),
             callback=self._show_ethernet_switching_table,
             update_location=False,
             schema=EthernetSwitchingReport().get_schema_instance()
         )
-        eth_switch_table.add_command(
+        self._add_or_override(
+            eth_switch_table,
             Syntax('interface', help='Display MAC table for a specified interface')
             .add_unnamed_argument('name', suggestions=MultipleKeyCompleters(keycompleters=[KeyCompleter(path="/interface[name=*]"), KeyCompleter(path="/interface[name=*]/subinterface[index=*]/name:")])),
             callback=self._show_ethernet_switching_table,
@@ -158,20 +222,42 @@ class Plugin(CliPlugin):
         )
 
         # 8. Route: show route / show route summary
-        route_cmd = self._add_or_override(cli.show_mode, Syntax('route', help='Show routing table'), callback=self._print_route)
-        self._add_or_override(route_cmd, Syntax('summary', help='Show route summary in Juniper format'), callback=self._print_route_summary)
+        route_cmd = self._add_or_override(target, Syntax('route', help='Show routing table'), callback=self._print_route, update_location=False)
+        self._add_or_override(route_cmd, Syntax('summary', help='Show route summary in Juniper format'), callback=self._print_route_summary, update_location=False)
 
         # 9. BGP Summary: show bgp summary
-        bgp_cmd = self._add_or_override(cli.show_mode, Syntax('bgp', help='Show BGP information'))
-        self._add_or_override(bgp_cmd, Syntax('summary', help='Show BGP summary in Juniper format'), callback=self._print_bgp_summary)
+        bgp_cmd = self._add_or_override(target, Syntax('bgp', help='Show BGP information'), update_location=False)
+        self._add_or_override(bgp_cmd, Syntax('summary', help='Show BGP summary in Juniper format'), callback=self._print_bgp_summary, update_location=False)
 
         # 10. OSPF Neighbor: show ospf neighbor
-        ospf_cmd = self._add_or_override(cli.show_mode, Syntax('ospf', help='Show OSPF information'))
-        self._add_or_override(ospf_cmd, Syntax('neighbor', help='Show OSPF neighbor in Juniper format'), callback=self._print_ospf_neighbor)
+        ospf_cmd = self._add_or_override(target, Syntax('ospf', help='Show OSPF information'), update_location=False)
+        self._add_or_override(ospf_cmd, Syntax('neighbor', help='Show OSPF neighbor in Juniper format'), callback=self._print_ospf_neighbor, update_location=False)
 
         # 11. IS-IS Adjacency: show isis adjacency
-        isis_cmd = self._add_or_override(cli.show_mode, Syntax('isis', help='Show IS-IS information'))
-        self._add_or_override(isis_cmd, Syntax('adjacency', help='Show IS-IS adjacency in Juniper format'), callback=self._print_isis_adjacency)
+        isis_cmd = self._add_or_override(target, Syntax('isis', help='Show IS-IS information'), update_location=False)
+        self._add_or_override(isis_cmd, Syntax('adjacency', help='Show IS-IS adjacency in Juniper format'), callback=self._print_isis_adjacency, update_location=False)
+
+    def load(self, cli, **_kwargs):
+        self._cli = cli
+        # 1. Root global command 'junos' for interactive submode and one-liners:
+        # e.g., 'junos show version' or entering 'junos' mode
+        junos_node = cli.add_global_command(
+            Syntax('junos', help='Juniper JUNOS operational mode and commands'),
+            update_location=_enter_submode
+        )
+        junos_show = self._add_or_override(
+            junos_node,
+            Syntax('show', help='Juniper JUNOS show reports'),
+            update_location=False
+        )
+        self._register_all_commands(junos_show)
+
+    def on_start(self, state):
+        if not should_register_show_mode('juniper'):
+            return
+        # 2. Register to show_mode for persona compatibility (e.g. juser)
+        wait_for_show_reports_load(state)
+        self._register_all_commands(state.command_tree.show_mode)
 
     # Callbacks
     def _print_version(self, state, output, **_kwargs):

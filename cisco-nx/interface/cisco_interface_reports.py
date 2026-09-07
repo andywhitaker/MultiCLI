@@ -35,6 +35,15 @@ def format_cisco_intf(name, short=True):
         return f"Vlan{num}"
     return name
 
+def cisco_mac_format(mac):
+    """Format MAC address to Cisco dotted hex notation (xxxx.xxxx.xxxx)."""
+    if not mac or mac == '--':
+        return "0000.0000.0000"
+    clean = re.sub(r'[^0-9a-fA-F]', '', str(mac)).lower()
+    if len(clean) == 12:
+        return f"{clean[0:4]}.{clean[4:8]}.{clean[8:12]}"
+    return str(mac)
+
 def format_cisco_speed(speed_str):
     """Format port speed to Cisco NX-OS format like 100G, 10G, 1000."""
     if not speed_str:
@@ -595,3 +604,181 @@ class CiscoInterfaceReports:
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
         output.print_line("Try SR Linux command: show interface brief")
+
+    def show_interface_detail(self, state, output, arguments=None):
+        """Display Cisco NX-OS style 'show interface [name]'."""
+        target_name = '*'
+        if arguments:
+            try:
+                target_name = arguments.get('interface', 'name') or '*'
+            except Exception:
+                try:
+                    target_name = arguments.get('interfaces', 'name') or '*'
+                except Exception:
+                    target_name = '*'
+
+        path = build_path('/interface[name={name}]', name=target_name)
+        try:
+            data = state.server_data_store.get_data(path, recursive=True, include_container_children=True)
+        except Exception:
+            return
+
+        blocks = []
+        intf_list = list(data.interface.items())
+        intf_list.sort(key=lambda x: cisco_intf_sort_key(x.name))
+
+        for intf in intf_list:
+            name = intf.name
+            c_name = format_cisco_intf(name, short=False)
+            admin = getattr(intf, 'admin_state', 'disable')
+            oper = getattr(intf, 'oper_state', 'down')
+            admin_status = "up" if admin == "enable" else "down"
+            oper_status = "up" if oper == "up" else "down"
+
+            desc = getattr(intf, 'description', '')
+            mtu = getattr(intf, 'mtu', 1500)
+
+            # Ethernet-specific attributes
+            mac_addr = "0000.0000.0000"
+            bia_addr = "0000.0000.0000"
+            bw_kbit = 100000000
+            duplex = "full"
+            speed_val = "100 Gb/s"
+            crc_errors = 0
+            giants = 0
+
+            if hasattr(intf, 'ethernet') and intf.ethernet.exists():
+                eth = intf.ethernet.get()
+                raw_mac = getattr(eth, 'hw_mac_address', None)
+                if raw_mac:
+                    mac_addr = cisco_mac_format(raw_mac)
+                    bia_addr = mac_addr
+                raw_speed = getattr(eth, 'port_speed', '100G') or '100G'
+                port_speed = str(raw_speed).upper()
+                if '100G' in port_speed:
+                    bw_kbit = 100000000
+                    speed_val = "100 Gb/s"
+                elif '40G' in port_speed:
+                    bw_kbit = 40000000
+                    speed_val = "40 Gb/s"
+                elif '25G' in port_speed:
+                    bw_kbit = 25000000
+                    speed_val = "25 Gb/s"
+                elif '10G' in port_speed:
+                    bw_kbit = 10000000
+                    speed_val = "10 Gb/s"
+                elif '1G' in port_speed:
+                    bw_kbit = 1000000
+                    speed_val = "1000 Mb/s"
+
+                try:
+                    raw_duplex = eth.duplex_mode
+                    duplex = str(raw_duplex).lower()
+                except Exception:
+                    duplex = "full"
+
+                try:
+                    if hasattr(eth, 'statistics') and eth.statistics.exists():
+                        eth_stats = eth.statistics.get()
+                        crc_errors = getattr(eth_stats, 'in_crc_error_frames', 0) or 0
+                        giants = getattr(eth_stats, 'in_oversize_frames', 0) or 0
+                except Exception:
+                    pass
+
+            # Traffic rate & statistics
+            in_bps = 0
+            out_bps = 0
+            if hasattr(intf, 'traffic_rate') and intf.traffic_rate.exists():
+                tr = intf.traffic_rate.get()
+                in_bps = getattr(tr, 'in_bps', 0) or 0
+                out_bps = getattr(tr, 'out_bps', 0) or 0
+
+            in_pps = round(in_bps / 800) if in_bps else 0
+            out_pps = round(out_bps / 800) if out_bps else 0
+
+            in_pkts = 0
+            in_octets = 0
+            in_multi = 0
+            in_bcast = 0
+            in_errors = 0
+            out_pkts = 0
+            out_octets = 0
+            out_multi = 0
+            out_bcast = 0
+            out_errors = 0
+            carrier_transitions = 0
+
+            if hasattr(intf, 'statistics') and intf.statistics.exists():
+                stats = intf.statistics.get()
+                in_pkts = getattr(stats, 'in_packets', 0) or 0
+                in_octets = getattr(stats, 'in_octets', 0) or 0
+                in_multi = getattr(stats, 'in_multicast_packets', 0) or 0
+                in_bcast = getattr(stats, 'in_broadcast_packets', 0) or 0
+                in_errors = getattr(stats, 'in_error_packets', 0) or 0
+                out_pkts = getattr(stats, 'out_packets', 0) or 0
+                out_octets = getattr(stats, 'out_octets', 0) or 0
+                out_multi = getattr(stats, 'out_multicast_packets', 0) or 0
+                out_bcast = getattr(stats, 'out_broadcast_packets', 0) or 0
+                out_errors = getattr(stats, 'out_error_packets', 0) or 0
+                carrier_transitions = getattr(stats, 'carrier_transitions', 0) or 0
+
+            # Mode & IPv4 addresses
+            mode_str = "routed"
+            ip_line = ""
+            if hasattr(intf, 'subinterface'):
+                for sub in intf.subinterface.items():
+                    if hasattr(sub, 'type') and sub.type == 'bridged':
+                        mode_str = "access"
+                    if hasattr(sub, 'ipv4') and sub.ipv4.exists():
+                        ipv4_node = sub.ipv4.get()
+                        if hasattr(ipv4_node, 'address'):
+                            for addr in ipv4_node.address.items():
+                                ip_line = f"  Internet Address is {addr.ip_prefix}"
+                                break
+
+            # Format Cisco NX-OS block
+            block_lines = [
+                f"{c_name} is {oper_status}",
+                f"admin state is {admin_status}, Dedicated Interface",
+                f"  Hardware: Ethernet, address: {mac_addr} (bia {bia_addr})",
+            ]
+            if desc:
+                block_lines.append(f"  Description: {desc}")
+            if ip_line:
+                block_lines.append(ip_line)
+            block_lines.extend([
+                f"  MTU {mtu} bytes, BW {bw_kbit} Kbit, DLY 10 usec",
+                f"  reliability 255/255, txload 1/255, rxload 1/255",
+                f"  Encapsulation ARPA, medium is broadcast",
+                f"  Port mode is {mode_str}",
+                f"  {duplex}-duplex, {speed_val}",
+                f"  Beacon is turned off",
+                f"  Auto-Negotiation is turned on",
+                f"  Input flow-control is off, output flow-control is off",
+                f"  Auto-mdix is turned off",
+                f"  Rate mode is dedicated",
+                f"  Switchport monitor is off",
+                f"  EtherType is 0x8100",
+                f"  {carrier_transitions} link status changes since last clear",
+                f"  Last clearing of \"show interface\" counters never",
+                f"  1 interface resets",
+                f"  30 seconds input rate {in_bps} bits/sec, {in_pps} packets/sec",
+                f"  30 seconds output rate {out_bps} bits/sec, {out_pps} packets/sec",
+                f"  Load-Interval #2: 5 minute (300 seconds)",
+                f"    input rate {in_bps} bps, {in_pps} pps; output rate {out_bps} bps, {out_pps} pps",
+                f"  RX",
+                f"    {in_pkts} packets {in_octets} bytes",
+                f"    {in_multi} multicast packets {in_bcast} broadcast packets",
+                f"    {in_errors} input errors {crc_errors} CRC 0 frame 0 overrun 0 ignored",
+                f"    0 abort 0 runts {giants} giants 0 invalid length",
+                f"  TX",
+                f"    {out_pkts} packets {out_octets} bytes",
+                f"    {out_multi} multicast packets {out_bcast} broadcast packets",
+                f"    {out_errors} output errors 0 collision 0 ignored 0 abort"
+            ])
+            blocks.append("\n".join(block_lines))
+
+        if blocks:
+            output.print_line("\n\n".join(blocks))
+        output.print_line("\n----------------------------------------------------------------------------------------------------")
+        output.print_line("Try SR Linux command: show interface detail")

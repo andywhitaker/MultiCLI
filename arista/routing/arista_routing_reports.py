@@ -617,5 +617,5 @@ class AristaRoutingReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show system network-instance protocols evpn")
+        output.print_line("Try SR Linux command: show system network-instance ethernet-segments")
 

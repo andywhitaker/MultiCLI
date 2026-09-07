@@ -114,7 +114,13 @@ class InterfaceDetails(object):
     
 
     def _fetch_state(self, state, arguments, output):
-        interface_name = arguments.get('interface', 'name')
+        try:
+            interface_name = arguments.get('interface', 'name') or '*'
+        except Exception:
+            try:
+                interface_name = arguments.get('interfaces', 'name') or '*'
+            except Exception:
+                interface_name = '*'
 
         path = build_path('/interface[name={name}]', name=interface_name) 
         my_data = state.server_data_store.get_data(path, recursive=True, include_container_children=True)

@@ -234,7 +234,7 @@ class CiscoRoutingReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show bfd session")
+        output.print_line("Try SR Linux command: info from state bfd")
 
     def show_ip_ospf_neighbor(self, state, output):
         """Display Cisco NX-OS style 'show ip ospf neighbor'."""
@@ -538,4 +538,4 @@ class CiscoRoutingReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show system network-instance protocols evpn")
+        output.print_line("Try SR Linux command: show system network-instance ethernet-segments")

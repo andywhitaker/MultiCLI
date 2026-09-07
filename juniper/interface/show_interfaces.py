@@ -153,10 +153,12 @@ class JperInterfaceBrief():
 
     def _stream_interfaces(self, state, arguments):
         """Function to return state data (specific or all if unspecified) from SR Linux"""
-        if arguments.get("interfaces", "name") == "*":
+        if arguments.has_node("interfaces") and arguments.get("interfaces", "name") != "*":
+            argument_name = arguments.get("interfaces", "name")
+        elif arguments.has_node("brief"):
             argument_name = arguments.get("brief", "name")
         else:
-            argument_name = arguments.get("interfaces", "name")
+            argument_name = "*"
         intf_name, subintf_index = strings.extract_interface_name_subinterface_index(argument_name)
         self._only_subinterface = subintf_index is not None
         path = build_path(f"/interface[name={intf_name}]")
@@ -359,10 +361,12 @@ class JperInterfaceTerse():
 
     def _stream_interfaces(self, state, arguments):
         """Function to return state data (specific or all if unspecified) from SR Linux"""
-        if arguments.get("interfaces", "name") == "*":
+        if arguments.has_node("interfaces") and arguments.get("interfaces", "name") != "*":
+            argument_name = arguments.get("interfaces", "name")
+        elif arguments.has_node("terse"):
             argument_name = arguments.get("terse", "name")
         else:
-            argument_name = arguments.get("interfaces", "name")
+            argument_name = "*"
         intf_name, subintf_index = strings.extract_interface_name_subinterface_index(argument_name)
         self._only_subinterface = subintf_index is not None
         path = build_path(f"/interface[name={intf_name}]")
@@ -582,7 +586,7 @@ class JperInterfaceSummary():
 
     def _stream_interfaces(self, state, arguments):
         """Function to return state data (specific or all if unspecified) from SR Linux"""
-        argument_name = arguments.get("interfaces", "name")
+        argument_name = arguments.get("interfaces", "name") if arguments.has_node("interfaces") else "*"
         intf_name, subintf_index = strings.extract_interface_name_subinterface_index(argument_name)
         self._only_subinterface = subintf_index is not None
         path = build_path(f"/interface[name={intf_name}]")

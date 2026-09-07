@@ -136,7 +136,7 @@ class AristaSystemReports:
         output.print_line(f"Hostname: {hostname}")
         output.print_line(f"FQDN:     {hostname}")
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: info from state /system/name")
+        output.print_line("Try SR Linux command: info from state system name")
 
     def show_clock(self, state, output):
         """Display Arista EOS style 'show clock'."""
@@ -167,7 +167,7 @@ class AristaSystemReports:
         output.print_line(f"{formatted_time}")
         output.print_line(f"Timezone: {timezone}")
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: info from state /system/clock")
+        output.print_line("Try SR Linux command: info from state system clock")
 
     def show_inventory(self, state, output):
         """Display Arista EOS style 'show inventory'."""
@@ -524,5 +524,5 @@ class AristaSystemReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show system information")
+        output.print_line("Try SR Linux command: info from state system information")
 

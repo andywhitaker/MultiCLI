@@ -153,7 +153,7 @@ class JunosSystemReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show system information")
+        output.print_line("Try SR Linux command: info from state system information")
 
     def show_chassis_hardware(self, state, output):
         """Display Juniper JUNOS style 'show chassis hardware'."""
@@ -356,4 +356,4 @@ class JunosSystemReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show system information")
+        output.print_line("Try SR Linux command: info from state system information")

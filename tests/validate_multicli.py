@@ -52,6 +52,20 @@ TEST_SUITES = {
             "show interface status",
             "show interfaces status",
             "show eos interface ethernet-1/1",
+            "eos show version",
+            "eos show hostname",
+            "eos show ip route",
+            "eos show interface",
+            "eos show interface ethernet-1/1",
+            "eos show interfaces",
+            "eos show interfaces status",
+        ],
+        "submode_tests": [
+            ("eos", ["show hostname", "show version"], "Nokia 7220 IXR-D2L"),
+            ("eos", ["show interface", "show interface ethernet-1/1"], "ethernet-1/1 is up"),
+            ("eos", ["show interfaces", "show interfaces status"], "Ethernet1/1"),
+            ("nxos", ["show hostname", "show version"], "Nokia SR Linux Software"),
+            ("junos", ["show version"], "Hostname:"),
         ],
         "negative_assertions": [
             ("show mlag", "state: Active", "show mlag should not output hardcoded 'state: Active' when no MLAG is configured"),
@@ -67,6 +81,10 @@ TEST_SUITES = {
             ("show mac address-table", "Vlan--", "show mac address-table should not output 'Vlan--'"),
             ("show mac address-table", "Vlan1", "show mac address-table should not convert IRB interface to Vlan1"),
             ("show eos interface ethernet-1/1", "packets/sec", "show eos interface detail should not output unsupported packets/sec metric"),
+            ("show interfaces status", "with framing overhead", "show interfaces status should not output interface detail"),
+            ("show interfaces description", "with framing overhead", "show interfaces description should not output interface detail"),
+            ("show interfaces transceiver", "with framing overhead", "show interfaces transceiver should not output interface detail"),
+            ("eos show interfaces status", "with framing overhead", "eos show interfaces status should not output interface detail"),
         ],
         "positive_assertions": [
             ("show ip route", "Gateway of last resort", "show ip route must contain Gateway of last resort header"),
@@ -78,6 +96,11 @@ TEST_SUITES = {
             ("show mac address-table", "1       0000.5e00.0101", "show mac address-table must dynamically resolve VLAN 1 for IRB MAC"),
             ("show mac address-table", "irb0.1", "show mac address-table must format IRB port as irb0.1"),
             ("show eos interface ethernet-1/1", "with framing overhead", "show eos interface detail should output input/output rate with framing overhead"),
+            ("eos show version", "Nokia 7220 IXR-D2L", "eos show version must output Arista-formatted version"),
+            ("eos show hostname", "leaf1", "eos show hostname must output hostname"),
+            ("eos show ip route", "Gateway of last resort", "eos show ip route must contain Gateway of last resort header"),
+            ("eos show interface", "ethernet-1/1 is up", "eos show interface must output interface status and statistics"),
+            ("eos show interface ethernet-1/1", "ethernet-1/1 is up", "eos show interface ethernet-1/1 must output interface detail"),
         ]
     },
     "Cisco NX-OS": {
@@ -127,6 +150,23 @@ TEST_SUITES = {
             "show nve vni",
             "show nve peers",
             "show vpc",
+            "nxos show version",
+            "nxos show hostname",
+            "nxos show ip route",
+            "nxos show interface",
+            "nxos show interface ethernet-1/1",
+            "nxos show interfaces",
+            "nxos show interface brief",
+            "show interface",
+            "show interface ethernet-1/1",
+            "show interfaces",
+        ],
+        "submode_tests": [
+            ("nxos", ["show hostname", "show version"], "Nokia SR Linux Software"),
+            ("nxos", ["show interface brief", "show interface ethernet-1/1"], "Ethernet1/1 is up"),
+            ("nxos", ["show ip route"], "Gateway of last resort"),
+            ("eos", ["show hostname", "show version"], "Nokia 7220 IXR-D2L"),
+            ("junos", ["show version"], "Hostname:"),
         ],
         "negative_assertions": [
             ("show vpc", "peer-link is up", "show vpc should not output hardcoded 'peer-link is up' when no VPC/ES is configured"),
@@ -138,6 +178,11 @@ TEST_SUITES = {
             ("show vlan", "--    app", "show vlan should dynamically derive VLAN tag rather than '--'"),
             ("show vlan", "Vlan0.", "show vlan should not output synthetic 'Vlan0.' interface names"),
             ("show vlan", "Vlan1", "show vlan should not convert IRB interface to Vlan1"),
+            ("show interface brief", "admin state is up, Dedicated Interface", "show interface brief should not output full interface detail"),
+            ("show interface status", "admin state is up, Dedicated Interface", "show interface status should not output full interface detail"),
+            ("show interface description", "admin state is up, Dedicated Interface", "show interface description should not output full interface detail"),
+            ("show interface transceiver", "admin state is up, Dedicated Interface", "show interface transceiver should not output full interface detail"),
+            ("nxos show interface brief", "admin state is up, Dedicated Interface", "nxos show interface brief should not output full interface detail"),
         ],
         "positive_assertions": [
             ("show processes cpu", "CPU utilization for five seconds:", "show processes cpu must contain CPU utilization summary"),
@@ -150,6 +195,14 @@ TEST_SUITES = {
             ("show vlan", "irb0.1", "show vlan must preserve irb0.1 interface name"),
             ("show mac address-table", "1   00:00:5E:00:01:01", "show mac address-table must show dynamic VLAN 1 for app MAC"),
             ("show mac address-table vlan 1", "irb0.1(R)", "show mac address-table vlan 1 must return matching VLAN 1 entries"),
+            ("show interface", "Ethernet1/1 is up", "show interface must output interface detail"),
+            ("show interface ethernet-1/1", "Ethernet1/1 is up", "show interface ethernet-1/1 must output interface detail"),
+            ("nxos show version", "Nokia SR Linux Software", "nxos show version must output Cisco-formatted version"),
+            ("nxos show hostname", "leaf2", "nxos show hostname must output hostname"),
+            ("nxos show ip route", "Gateway of last resort", "nxos show ip route must contain Gateway of last resort header"),
+            ("nxos show interface", "Ethernet1/1 is up", "nxos show interface must output interface detail"),
+            ("nxos show interface ethernet-1/1", "Ethernet1/1 is up", "nxos show interface ethernet-1/1 must output interface detail"),
+            ("nxos show interface brief", "Eth1/1", "nxos show interface brief must output Ethernet interfaces"),
         ]
     },
     "Juniper JUNOS": {
@@ -180,11 +233,22 @@ TEST_SUITES = {
             "show bgp summary",
             "show ospf neighbor",
             "show isis adjacency",
+            "junos show version",
+            "junos show route",
+            "junos show interfaces",
+        ],
+        "submode_tests": [
+            ("junos", ["show version", "show route"], "inet.0:"),
+            ("junos", ["show interfaces"], "Physical interface:"),
+            ("eos", ["show hostname", "show version"], "Nokia 7220 IXR-D2L"),
+            ("nxos", ["show hostname", "show version"], "Nokia SR Linux Software"),
         ],
         "negative_assertions": [
             ("show system uptime", "Time Source: NTP CLOCK", "show system uptime should dynamically verify NTP state rather than hardcoding NTP CLOCK"),
             ("show vlans", "app                   0", "show vlans should not output tag 0 for app when IRB tag is 1"),
             ("show ethernet-switching table vlan 1", "irb0.2", "show ethernet-switching table vlan 1 should not leak VLAN 2 entries"),
+            ("show system processes summary", "PID USERNAME", "show system processes summary should not output full process table"),
+            ("show route summary", "via 10.", "show route summary should not output individual next-hops"),
         ],
         "positive_assertions": [
             ("show route", "re:inet\\.0: \\d+ destinations", "show route must contain destinations and routes header"),
@@ -192,6 +256,8 @@ TEST_SUITES = {
             ("show system processes", "re:THR\\s+PRI", "show system processes must include THR column"),
             ("show vlans", "app                   1", "show vlans must dynamically derive tag 1 for app"),
             ("show ethernet-switching table vlan 1", "irb0.1(R)", "show ethernet-switching table vlan 1 must return VLAN 1 entries"),
+            ("junos show version", "Hostname:", "junos show version must output Juniper-formatted version"),
+            ("junos show route", "inet.0:", "junos show route must output Juniper-formatted route table"),
         ]
     }
 }
@@ -283,6 +349,46 @@ def run_suite(suite_name, suite, args, parallel=True):
                 status = "PASS"
                 print(f"  {prefix}[{idx:2d}/{len(commands):2d}] {cmd:<44} -> {status} ({dt:.2f}s)")
 
+    # Submode interactive tests
+    submode_tests = suite.get("submode_tests", [])
+    for s_idx, (submode, subcmds, expected) in enumerate(submode_tests, 1):
+        cmds = [subcmds] if isinstance(subcmds, str) else list(subcmds)
+        test_display = f"{submode} -> {' ; '.join(cmds)}"
+        full_cmd = ["docker", "exec", "-i", node, "sr_cli"]
+        input_str = f"{submode}\n" + "\n".join(cmds) + "\npwc\nexit\n"
+        t0 = time.time()
+        res = subprocess.run(full_cmd, input=input_str, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        dt = time.time() - t0
+        errors = []
+        if res.returncode != 0:
+            errors.append(f"Non-zero exit code: {res.returncode}")
+        for pat in ERROR_PATTERNS:
+            if pat in res.stdout or pat in res.stderr:
+                errors.append(f"Found error pattern '{pat}'")
+        if expected not in res.stdout:
+            errors.append(f"Expected pattern '{expected}' missing from submode output")
+        if submode not in [line.strip() for line in res.stdout.splitlines()]:
+            errors.append(f"Submode '{submode}' was not retained as present working context (pwc check failed)")
+
+        prefix = f"[{node}] " if parallel else ""
+        with print_lock:
+            if errors:
+                failed += 1
+                status = "FAIL"
+                failures.append({
+                    "suite": suite_name,
+                    "node": node,
+                    "command": f"submode: {test_display}",
+                    "errors": errors,
+                    "stdout": res.stdout,
+                    "stderr": res.stderr
+                })
+                print(f"  {prefix}[submode] {test_display:<39} -> {status} ({dt:.2f}s) - {'; '.join(errors)}")
+            else:
+                passed += 1
+                status = "PASS"
+                print(f"  {prefix}[submode] {test_display:<39} -> {status} ({dt:.2f}s)")
+
     return passed, failed, failures
 
 def validate(args):
@@ -299,18 +405,18 @@ def validate(args):
         script_dir = os.path.dirname(os.path.abspath(__file__))
         switch_script = os.path.join(script_dir, "..", "switch-multicli.sh")
         print("\n==> Installing MultiCLI personas to target nodes...")
-        install_tasks = [("arista", "arista_node", "leaf1"),
-                         ("cisco", "cisco_node", "leaf2"),
-                         ("juniper", "juniper_node", "leaf3")]
+        install_tasks = [("leaf1", "arista_node", "arista"),
+                         ("leaf2", "cisco_node", "cisco"),
+                         ("leaf3", "juniper_node", "juniper")]
         if not getattr(args, 'sequential', False):
             with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                futs = [executor.submit(subprocess.run, [switch_script, persona, getattr(args, key, def_node)], check=True)
-                        for persona, key, def_node in install_tasks]
+                futs = [executor.submit(subprocess.run, [switch_script, "all", getattr(args, key, def_node), "--default", persona], check=True)
+                        for def_node, key, persona in install_tasks]
                 for f in futs:
                     f.result()
         else:
-            for persona, key, def_node in install_tasks:
-                subprocess.run([switch_script, persona, getattr(args, key, def_node)], check=True)
+            for def_node, key, persona in install_tasks:
+                subprocess.run([switch_script, "all", getattr(args, key, def_node), "--default", persona], check=True)
         time.sleep(1)
 
     suites_to_run = list(TEST_SUITES.items())

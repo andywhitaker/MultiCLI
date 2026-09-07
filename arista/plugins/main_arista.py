@@ -5,7 +5,7 @@
 ###########################################################################
 
 import srlinux.schema.schema_syntax_builder
-from srlinux.mgmt.cli import CliPlugin, KeyCompleter, RequiredPlugin
+from srlinux.mgmt.cli import CliPlugin, KeyCompleter, RequiredPlugin, MultipleKeyCompleters
 from srlinux.syntax import Syntax
 from srlinux.location import build_path
 import sys
@@ -41,7 +41,10 @@ for subdir in ["ip", "bgp", "interface", "system", "routing"]:
         sys.path.insert(0, sub_path)
 
 try:
-    from ip_bgp_report import IpBgpReport as BaseBgpReport
+    try:
+        from arista_ip_bgp_report import IpBgpReport as BaseBgpReport
+    except ImportError:
+        from ip_bgp_report import IpBgpReport as BaseBgpReport
     from bgp_evpn_report import IpBgpReport as EvpnBgpReport
     from arista_interface_detail import InterfaceDetails
     from arista_interface_status import InterfaceStatus
@@ -53,329 +56,540 @@ try:
 except Exception:
     raise
 
+from srlinux.mgmt.cli.lazy_loader_utils import wait_for_show_reports_load
+from srlinux.mgmt.cli.cli_mode import CliMode
+from srlinux.mgmt.cli.cli_state import CliState
+from srlinux.schema.data_store import DataStore
+import os
+
+_active_data_store_override = None
+
+_orig_is_intermediate = getattr(CliState, '_orig_multicli_is_intermediate', None)
+if _orig_is_intermediate is None:
+    _orig_is_intermediate = CliState.is_intermediate_command.fget
+    CliState._orig_multicli_is_intermediate = _orig_is_intermediate
+
+    def _multicli_is_intermediate(self):
+        first_cmd = self.first_regular_command_name
+        if first_cmd in ['eos', 'nxos', 'junos']:
+            return not self.is_last_command
+        return _orig_is_intermediate(self)
+
+    CliState.is_intermediate_command = property(_multicli_is_intermediate)
+
+_orig_server_data_store = getattr(CliState, '_orig_multicli_server_data_store', None)
+if _orig_server_data_store is None:
+    _orig_server_data_store = CliState.server_data_store.fget
+    CliState._orig_multicli_server_data_store = _orig_server_data_store
+
+    def _multicli_server_data_store(self):
+        global _active_data_store_override
+        if _active_data_store_override is not None:
+            return _active_data_store_override
+        return _orig_server_data_store(self)
+
+    CliState.server_data_store = property(_multicli_server_data_store)
+
+def _enter_submode(state, arguments):
+    if state.is_last_command:
+        state.location = arguments
+
+def should_register_show_mode(persona_name):
+    config_file = '/etc/opt/srlinux/cli/default_persona'
+    if os.path.exists(config_file):
+        try:
+            with open(config_file) as f:
+                pref = f.read().strip().lower()
+                if pref == 'none':
+                    return False
+                if pref in [persona_name, persona_name.replace('-', ''), 'all']:
+                    return True
+                return False
+        except Exception:
+            pass
+    return True
+
 class Plugin(CliPlugin):
 
-    def get_required_plugins(self):
-        return [
-            RequiredPlugin('version', module='srlinux'),
-        ]
+    def _get_child(self, parent, name):
+        if hasattr(parent, 'get_command_or_none'):
+            return parent.get_command_or_none(name)
+        elif hasattr(parent, 'root'):
+            return parent.root.get_command_or_none(name)
+        return None
+
+    def _wrap_callback(self, callback):
+        if not callback:
+            return None
+        def wrapped(state, *args, **kwargs):
+            if state.is_intermediate_command:
+                return
+            global _active_data_store_override
+            _active_data_store_override = state.server.get_data_store(DataStore.State)
+            try:
+                return callback(state, *args, **kwargs)
+            finally:
+                _active_data_store_override = None
+        return wrapped
 
     def _add_or_override(self, parent, syntax, callback=None, schema=None, update_location=False):
-        if hasattr(parent, 'get_command_or_none'):
-            node = parent.get_command_or_none(syntax.name)
-        elif hasattr(parent, 'root'):
-            node = parent.root.get_command_or_none(syntax.name)
-        else:
-            node = None
+        node = self._get_child(parent, syntax.name)
         if node:
             if callback:
-                node.set_callback(callback)
+                node.set_callback(self._wrap_callback(callback))
             return node
-        return parent.add_command(syntax, callback=callback, schema=schema, update_location=update_location)
+        kwargs = {'update_location': update_location}
+        if callback is not None:
+            kwargs['callback'] = self._wrap_callback(callback)
+        if schema is not None:
+            kwargs['schema'] = schema
+        return parent.add_command(syntax, **kwargs)
 
-    def load(self, cli, **_kwargs):
+    def _register_all_commands(self, target):
         # 1. System Commands: version, hostname, clock, inventory, environment
         self._add_or_override(
-            cli.show_mode,
+            target,
             Syntax('version', help='Show system version in Arista EOS format'),
-            callback=self._print_version
+            callback=self._print_version,
+            update_location=False
         )
 
         self._add_or_override(
-            cli.show_mode,
+            target,
             Syntax('hostname', help='Show system hostname'),
-            callback=self._print_hostname
+            callback=self._print_hostname,
+            update_location=False
         )
 
         self._add_or_override(
-            cli.show_mode,
+            target,
             Syntax('clock', help='Show system clock in Arista EOS format'),
-            callback=self._print_clock
+            callback=self._print_clock,
+            update_location=False
         )
 
         self._add_or_override(
-            cli.show_mode,
+            target,
             Syntax('inventory', help='Show system hardware inventory'),
-            callback=self._print_inventory
+            callback=self._print_inventory,
+            update_location=False
         )
 
         env_cmd = self._add_or_override(
-            cli.show_mode,
+            target,
             Syntax('environment', help='Show environment status'),
-            callback=self._print_environment_all
+            callback=self._print_environment_all,
+            update_location=False
         )
         self._add_or_override(
             env_cmd,
             Syntax('cooling', help='Show cooling status'),
-            callback=self._print_environment_cooling
+            callback=self._print_environment_cooling,
+            update_location=False
         )
         self._add_or_override(
             env_cmd,
             Syntax('power', help='Show power supply status'),
-            callback=self._print_environment_power
+            callback=self._print_environment_power,
+            update_location=False
         )
         self._add_or_override(
             env_cmd,
             Syntax('temperature', help='Show temperature status'),
-            callback=self._print_environment_temp
+            callback=self._print_environment_temp,
+            update_location=False
         )
 
         self._add_or_override(
-            cli.show_mode,
+            target,
             Syntax('module', help='Show module information in Arista EOS format'),
-            callback=self._print_module
+            callback=self._print_module,
+            update_location=False
         )
 
         proc_cmd = self._add_or_override(
-            cli.show_mode,
-            Syntax('processes', help='Show process information in Arista EOS format')
+            target,
+            Syntax('processes', help='Show process information in Arista EOS format'),
+            update_location=False
         )
         proc_top = self._add_or_override(
             proc_cmd,
-            Syntax('top', help='Show top processes')
+            Syntax('top', help='Show top processes'),
+            update_location=False
         )
         self._add_or_override(
             proc_top,
             Syntax('once', help='Show top processes once'),
-            callback=self._print_processes_top_once
+            callback=self._print_processes_top_once,
+            update_location=False
         )
 
         self._add_or_override(
-            cli.show_mode,
+            target,
             Syntax('mlag', help='Show MLAG information in Arista EOS format'),
-            callback=self._print_mlag
+            callback=self._print_mlag,
+            update_location=False
         )
 
         # 2. IP Commands: show ip bgp, show ip route, show ip interface brief, show ip arp, show ip ospf
-        ip = cli.show_mode.root.get_command_or_none('ip')
-        if not ip:
-            ip = cli.show_mode.add_command(Syntax('ip', help='display ip protocol information'), update_location=True)
-
-        bgp = ip.add_command(
-            Syntax('bgp', help='show bgp information'),
-            update_location=True
+        ip = self._add_or_override(
+            target,
+            Syntax('ip', help='display ip protocol information'),
+            update_location=False
         )
-        bgp.add_command(
+
+        bgp = self._add_or_override(
+            ip,
+            Syntax('bgp', help='show bgp information'),
+            update_location=False
+        )
+        self._add_or_override(
+            bgp,
             Syntax('summary')
             .add_named_argument('vrf', default='default', help='network instance name', suggestions=KeyCompleter('/network-instance[name=*]')),
-            callback=self._print_summary
+            callback=self._print_summary,
+            update_location=False
         )
-        bgp_vrf = bgp.add_command(
+        bgp_vrf = self._add_or_override(
+            bgp,
             Syntax('vrf').add_unnamed_argument('vrf_name', suggestions=KeyCompleter('/network-instance[name=*]')),
             update_location=False
         )
-        bgp_vrf.add_command(
+        self._add_or_override(
+            bgp_vrf,
             Syntax('summary', help='BGP summary for VRF'),
             callback=self._print_vrf_bgp_summary,
             update_location=False
         )
 
         # IP Route
-        ip_route = ip.add_command(
+        ip_route = self._add_or_override(
+            ip,
             Syntax('route', help='IP routing table'),
-            callback=self._print_ip_route
+            callback=self._print_ip_route,
+            update_location=False
         )
-        ip_route.add_command(
+        self._add_or_override(
+            ip_route,
             Syntax('vrf').add_unnamed_argument('vrf_name', suggestions=KeyCompleter('/network-instance[name=*]')),
             callback=self._print_vrf_route,
             update_location=False
         )
 
         # IP Interface Brief
-        ip_intf = ip.get_command_or_none('interface')
-        if not ip_intf:
-            ip_intf = ip.add_command(Syntax('interface', help='IP interface information'))
-        ip_intf.add_command(
+        ip_intf = self._add_or_override(
+            ip,
+            Syntax('interface', help='IP interface information'),
+            update_location=False
+        )
+        self._add_or_override(
+            ip_intf,
             Syntax('brief', help='IP interface brief'),
             callback=self._print_ip_interface_brief,
             update_location=False
         )
 
         # IP ARP
-        ip.add_command(
+        self._add_or_override(
+            ip,
             Syntax('arp', help='IP ARP table'),
-            callback=self._print_ip_arp
+            callback=self._print_ip_arp,
+            update_location=False
         )
 
         # IP OSPF
-        ip_ospf = ip.add_command(Syntax('ospf', help='IP OSPF information'))
-        ip_ospf.add_command(
-            Syntax('neighbor', help='OSPF neighbors'),
-            callback=self._print_ospf_neighbor
+        ip_ospf = self._add_or_override(
+            ip,
+            Syntax('ospf', help='IP OSPF information'),
+            update_location=False
         )
-        ospf_intf = ip_ospf.add_command(Syntax('interface', help='OSPF interface information'))
-        ospf_intf.add_command(
+        self._add_or_override(
+            ip_ospf,
+            Syntax('neighbor', help='OSPF neighbors'),
+            callback=self._print_ospf_neighbor,
+            update_location=False
+        )
+        ospf_intf = self._add_or_override(
+            ip_ospf,
+            Syntax('interface', help='OSPF interface information'),
+            update_location=False
+        )
+        self._add_or_override(
+            ospf_intf,
             Syntax('brief', help='OSPF interface brief'),
-            callback=self._print_ospf_interface_brief
+            callback=self._print_ospf_interface_brief,
+            update_location=False
         )
 
         # 3. EVPN Commands
-        bgp_root = cli.show_mode.root.get_command_or_none('bgp')
-        if not bgp_root:
-            bgp_root = cli.show_mode.add_command(Syntax('bgp', help='display bgp information'), update_location=True)
-
-        evpn = bgp_root.add_command(
-            Syntax('evpn', help='show EVPN information'),
-            update_location=True
+        bgp_root = self._add_or_override(
+            target,
+            Syntax('bgp', help='display bgp information'),
+            update_location=False
         )
-        evpn.add_command(
+
+        evpn = self._add_or_override(
+            bgp_root,
+            Syntax('evpn', help='show EVPN information'),
+            update_location=False
+        )
+        self._add_or_override(
+            evpn,
             Syntax('summary')
             .add_named_argument('vrf', default='default', help='network instance name', suggestions=KeyCompleter('/network-instance[name=*]')),
-            callback=self._print_evpn_summary
+            callback=self._print_evpn_summary,
+            update_location=False
         )
-        route_type = evpn.add_command(Syntax('route-type', help='specify the EVPN route type'))
-        route_type.add_command(
+        route_type = self._add_or_override(
+            evpn,
+            Syntax('route-type', help='specify the EVPN route type'),
+            update_location=False
+        )
+        self._add_or_override(
+            route_type,
             Syntax('auto-discovery')
             .add_named_argument('vrf', default='default', help='network instance name', suggestions=KeyCompleter('/network-instance[name=*]'))
             .add_named_argument('esi', default='*', help='ESI value'),
-            callback=self._print_1
+            callback=self._print_1,
+            update_location=False
         )
-        route_type.add_command(
+        self._add_or_override(
+            route_type,
             Syntax('mac-ip')
             .add_named_argument('vrf', default='default', help='network instance name', suggestions=KeyCompleter('/network-instance[name=*]'))
             .add_named_argument('mac-address', default='*', help='MAC address'),
-            callback=self._print_2
+            callback=self._print_2,
+            update_location=False
         )
-        route_type.add_command(
+        self._add_or_override(
+            route_type,
             Syntax('imet')
             .add_named_argument('vrf', default='default', help='network instance name', suggestions=KeyCompleter('/network-instance[name=*]'))
             .add_named_argument('origin-router', default='*', help='Originating router IPv4 or IPv6 address'),
-            callback=self._print_3
+            callback=self._print_3,
+            update_location=False
         )
-        route_type.add_command(
+        self._add_or_override(
+            route_type,
             Syntax('ethernet-segment')
             .add_named_argument('vrf', default='default', help='network instance name', suggestions=KeyCompleter('/network-instance[name=*]'))
             .add_named_argument('esi', default='*', help='ESI value'),
-            callback=self._print_4
+            callback=self._print_4,
+            update_location=False
         )
-        route_type.add_command(
+        self._add_or_override(
+            route_type,
             Syntax('ip-prefix')
             .add_named_argument('vrf', default='default', help='network instance name', suggestions=KeyCompleter('/network-instance[name=*]'))
             .add_named_argument('ip-address', default='*', help='IPv4 or IPv6 address prefix'),
-            callback=self._print_5
+            callback=self._print_5,
+            update_location=False
         )
 
         # 4. Interfaces Commands: show interfaces status, description, detail
-        intfs = cli.show_mode.root.get_command_or_none('interfaces')
-        if not intfs:
-            intfs = cli.show_mode.add_command(Syntax('interfaces', help='Interface status and information'), update_location=True)
-        intfs.add_command(
+        intfs_syntax = Syntax('interfaces', help='Interface status and information')
+        intfs_syntax.add_unnamed_argument(
+            'name', default='*', suggestions=MultipleKeyCompleters(keycompleters=[KeyCompleter(path="/interface[name=*]")])
+        )
+        intfs = self._add_or_override(
+            target,
+            intfs_syntax,
+            callback=self._interface_details,
+            update_location=False
+        )
+        self._add_or_override(
+            intfs,
             InterfaceStatus().get_syntax_status(),
-            update_location=True,
+            update_location=False,
             callback=self._interface_status,
             schema=InterfaceStatus().get_data_schema()
         )
-        intfs.add_command(
+        self._add_or_override(
+            intfs,
             Syntax('description', help='Interface descriptions'),
-            callback=self._print_interfaces_description
+            callback=self._print_interfaces_description,
+            update_location=False
         )
-        intfs_xcvr = intfs.add_command(
+        intfs_xcvr = self._add_or_override(
+            intfs,
             Syntax('transceiver', help='Transceiver and DDM status in Arista EOS format'),
-            callback=self._print_interfaces_transceiver
+            callback=self._print_interfaces_transceiver,
+            update_location=False
         )
-        intfs_xcvr.add_command(
+        self._add_or_override(
+            intfs_xcvr,
             Syntax('detail', help='Transceiver detail'),
-            callback=self._print_interfaces_transceiver_detail
+            callback=self._print_interfaces_transceiver_detail,
+            update_location=False
         )
 
         # Also support on 'interface' singular
-        intf_singular = cli.show_mode.root.get_command_or_none('interface')
-        if intf_singular:
-            intf_status_existing = intf_singular.get_command_or_none('status')
-            if not intf_status_existing:
-                intf_singular.add_command(
-                    InterfaceStatus().get_syntax_status(),
-                    update_location=True,
-                    callback=self._interface_status,
-                    schema=InterfaceStatus().get_data_schema()
-                )
-            intf_desc_existing = intf_singular.get_command_or_none('description')
-            if not intf_desc_existing:
-                intf_singular.add_command(
-                    Syntax('description', help='Interface descriptions'),
-                    callback=self._print_interfaces_description
-                )
-            intf_xcvr_existing = intf_singular.get_command_or_none('transceiver')
-            if not intf_xcvr_existing:
-                s_xcvr = intf_singular.add_command(
-                    Syntax('transceiver', help='Transceiver and DDM status in Arista EOS format'),
-                    callback=self._print_interfaces_transceiver
-                )
-                s_xcvr.add_command(
-                    Syntax('detail', help='Transceiver detail'),
-                    callback=self._print_interfaces_transceiver_detail
-                )
+        intf_singular = self._add_or_override(
+            target,
+            InterfaceDetails().get_syntax_details(),
+            callback=self._interface_details,
+            update_location=False
+        )
+        self._add_or_override(
+            intf_singular,
+            InterfaceStatus().get_syntax_status(),
+            update_location=False,
+            callback=self._interface_status,
+            schema=InterfaceStatus().get_data_schema()
+        )
+        self._add_or_override(
+            intf_singular,
+            Syntax('description', help='Interface descriptions'),
+            callback=self._print_interfaces_description,
+            update_location=False
+        )
+        s_xcvr = self._add_or_override(
+            intf_singular,
+            Syntax('transceiver', help='Transceiver and DDM status in Arista EOS format'),
+            callback=self._print_interfaces_transceiver,
+            update_location=False
+        )
+        self._add_or_override(
+            s_xcvr,
+            Syntax('detail', help='Transceiver detail'),
+            callback=self._print_interfaces_transceiver_detail,
+            update_location=False
+        )
 
         # 5. LLDP Commands
-        lldp_node = cli.show_mode.root.get_command_or_none('lldp')
-        if not lldp_node:
-            lldp_node = cli.show_mode.add_command(Syntax('lldp', help='LLDP information'))
-        lldp_neigh = lldp_node.add_command(
-            Syntax('neighbors', help='LLDP neighbors in Arista format'),
-            callback=self._print_lldp_neighbors
+        lldp_node = self._add_or_override(
+            target,
+            Syntax('lldp', help='LLDP information'),
+            update_location=False
         )
-        lldp_neigh.add_command(
+        lldp_neigh = self._add_or_override(
+            lldp_node,
+            Syntax('neighbors', help='LLDP neighbors in Arista format'),
+            callback=self._print_lldp_neighbors,
+            update_location=False
+        )
+        self._add_or_override(
+            lldp_neigh,
             Syntax('detail', help='LLDP neighbors detail'),
-            callback=self._print_lldp_neighbors_detail
+            callback=self._print_lldp_neighbors_detail,
+            update_location=False
+        )
+        lldp_single = self._add_or_override(
+            lldp_node,
+            Syntax('neighbor', help='LLDP neighbors in Arista format'),
+            callback=self._print_lldp_neighbors,
+            update_location=False
+        )
+        self._add_or_override(
+            lldp_single,
+            Syntax('detail', help='LLDP neighbors detail'),
+            callback=self._print_lldp_neighbors_detail,
+            update_location=False
         )
 
         # 6. MAC Table Commands
-        mac_node = cli.show_mode.root.get_command_or_none('mac')
-        if not mac_node:
-            mac_node = cli.show_mode.add_command(Syntax('mac', help='MAC information'))
-        mac_node.add_command(
+        mac_node = self._add_or_override(
+            target,
+            Syntax('mac', help='MAC information'),
+            update_location=False
+        )
+        self._add_or_override(
+            mac_node,
             Syntax('address-table', help='MAC address table'),
-            callback=self._print_mac_address_table
+            callback=self._print_mac_address_table,
+            update_location=False
         )
 
         # 7. VRF & VLAN Commands
         self._add_or_override(
-            cli.show_mode,
+            target,
             Syntax('vrf', help='VRF information in Arista format'),
-            callback=self._print_vrf
+            callback=self._print_vrf,
+            update_location=False
         )
         self._add_or_override(
-            cli.show_mode,
+            target,
             Syntax('vlan', help='VLAN information in Arista format'),
-            callback=self._print_vlan
+            callback=self._print_vlan,
+            update_location=False
         )
 
         # 8. Port-Channel Commands
-        pc_node = cli.show_mode.root.get_command_or_none('port-channel')
-        if not pc_node:
-            pc_node = cli.show_mode.add_command(Syntax('port-channel', help='Port-Channel information'))
-        pc_node.add_command(
+        pc_node = self._add_or_override(
+            target,
+            Syntax('port-channel', help='Port-Channel information'),
+            update_location=False
+        )
+        self._add_or_override(
+            pc_node,
             Syntax('summary', help='Port-Channel summary in Arista format'),
-            callback=self._print_port_channel_summary
+            callback=self._print_port_channel_summary,
+            update_location=False
         )
 
         # 9. IS-IS Commands
-        isis_node = cli.show_mode.root.get_command_or_none('isis')
-        if not isis_node:
-            isis_node = cli.show_mode.add_command(Syntax('isis', help='IS-IS information'))
-        isis_node.add_command(
+        isis_node = self._add_or_override(
+            target,
+            Syntax('isis', help='IS-IS information'),
+            update_location=False
+        )
+        self._add_or_override(
+            isis_node,
             Syntax('neighbors', help='IS-IS neighbors in Arista format'),
-            callback=self._print_isis_neighbors
+            callback=self._print_isis_neighbors,
+            update_location=False
         )
 
-        # 10. Legacy 'show eos ...' container preserved for compatibility
-        eos_node = cli.show_mode.root.get_command_or_none('eos')
-        if not eos_node:
-            eos_node = cli.show_mode.add_command(Syntax('eos', help='Show Arista EOS reports'))
-        eos_interfaces = eos_node.add_command(
+    def load(self, cli, **_kwargs):
+        self._cli = cli
+        # 1. Root global command 'eos' for interactive submode and one-liners:
+        # e.g., 'eos show version' or entering 'eos' mode
+        eos_node = cli.add_global_command(
+            Syntax('eos', help='Arista EOS operational mode and commands'),
+            update_location=_enter_submode
+        )
+        eos_show = self._add_or_override(
+            eos_node,
+            Syntax('show', help='Arista EOS show reports'),
+            update_location=False
+        )
+        self._register_all_commands(eos_show)
+
+        # Also support arp on eos_show
+        self._add_or_override(
+            eos_show,
+            ArpDetails()._get_syntax_arp(),
+            update_location=False,
+            callback=self._arp_entries,
+            schema=ArpDetails()._get_arp_schema(True)
+        )
+
+    def on_start(self, state):
+        if not should_register_show_mode('arista'):
+            return
+        # 2. Register to show_mode for persona compatibility (e.g. auser)
+        wait_for_show_reports_load(state)
+        self._register_all_commands(state.command_tree.show_mode)
+
+        # 3. Legacy 'show eos ...' container preserved for compatibility
+        eos_legacy = self._add_or_override(state.command_tree.show_mode, Syntax('eos', help='Show Arista EOS reports'), update_location=False)
+        eos_interfaces = self._add_or_override(
+            eos_legacy,
             InterfaceDetails().get_syntax_details(),
-            update_location=True,
+            update_location=False,
             callback=self._interface_details
         )
-        eos_interfaces.add_command(
+        self._add_or_override(
+            eos_interfaces,
             InterfaceStatus().get_syntax_status(),
-            update_location=True,
+            update_location=False,
             callback=self._interface_status,
             schema=InterfaceStatus().get_data_schema()
         )
-        eos_node.add_command(
+        self._add_or_override(
+            eos_legacy,
             ArpDetails()._get_syntax_arp(),
-            update_location=True,
+            update_location=False,
             callback=self._arp_entries,
             schema=ArpDetails()._get_arp_schema(True)
         )

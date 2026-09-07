@@ -132,7 +132,7 @@ class CiscoSystemReports:
 
         output.print_line(hostname)
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show system name")
+        output.print_line("Try SR Linux command: info from state system name")
 
     def show_clock(self, state, output):
         """Display Cisco NX-OS style 'show clock': HH:MM:SS.mmm UTC Day Mon DD YYYY."""
@@ -140,7 +140,7 @@ class CiscoSystemReports:
         clock_str = now.strftime("%H:%M:%S.%f")[:-3] + " UTC " + now.strftime("%a %b %d %Y")
         output.print_line(clock_str)
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show system clock")
+        output.print_line("Try SR Linux command: info from state system clock")
 
     def show_inventory(self, state, output):
         """Display Cisco NX-OS style 'show inventory'."""
@@ -456,4 +456,4 @@ class CiscoSystemReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show system information")
+        output.print_line("Try SR Linux command: info from state system information")
