@@ -317,7 +317,7 @@ def multicli_function(selected_nos, seleceted_repo_url):
                             case 'all':
                                 for d in ['arista', 'cisco-nx', 'juniper', 'nokia']:
                                     subprocess.run(f"cp -r {extracted_root}/{d}/* {cli_plugins_dir}/.", shell=True, check=True)
-                                subprocess.run(f"echo 'all' > {cli_plugins_dir}/default_persona", shell=True, check=True)
+                                subprocess.run(f"echo 'none' > {cli_plugins_dir}/default_persona", shell=True, check=True)
 
                         logging.info(f"Deleting temp folder...")
                         subprocess.run(f"rm -rf {tmp_dir}", shell=True, check=True)
