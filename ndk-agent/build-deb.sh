@@ -46,6 +46,9 @@ for ARCH in "${ARCH_LIST[@]}"; do
     chmod 755 "$BUILD_ROOT/etc/opt/srlinux/appmgr/multicli/multicli.sh"
     chmod 755 "$BUILD_ROOT/etc/opt/srlinux/appmgr/multicli/multicli_version.sh"
 
+    # Update version in version script
+    echo -e "#!/bin/bash\n\necho \"v${VERSION}\"" > "$BUILD_ROOT/etc/opt/srlinux/appmgr/multicli/multicli_version.sh"
+
     # Update Architecture in control file (Debian uses amd64 for x86_64)
     CONTROL_ARCH="$ARCH"
     if [ "$CONTROL_ARCH" = "x86_64" ]; then
@@ -64,7 +67,11 @@ for ARCH in "${ARCH_LIST[@]}"; do
     OUTPUT_DEB="$SCRIPT_DIR/srl-multicli_${ARCH}.deb"
     dpkg-deb --build --root-owner-group "$BUILD_ROOT" "$OUTPUT_DEB" >/dev/null
 
-    echo "==> Generated: $OUTPUT_DEB ($(ls -lh "$OUTPUT_DEB" | awk '{print $5}'))"
+    # Create canonical versioned package copy for releases
+    VERSIONED_DEB="$SCRIPT_DIR/srl-multicli_${VERSION}_${ARCH}.deb"
+    cp -f "$OUTPUT_DEB" "$VERSIONED_DEB"
+
+    echo "==> Generated: $OUTPUT_DEB and $VERSIONED_DEB ($(ls -lh "$OUTPUT_DEB" | awk '{print $5}'))"
     rm -rf "$BUILD_ROOT"
 done
 

@@ -5,6 +5,10 @@ module multicli {
 
     prefix "multicli";
 
+    revision 2026-09-07 {
+        description "MultiCLI v1.0.0 release with multi-vendor support";
+    }
+
     revision 2026-04-01 {
         description "First release";
     }
@@ -35,7 +39,7 @@ module multicli {
             type string {
                 pattern 'https?://.+\.zip';
             }
-            default "https://github.com/srl-labs/MultiCLI/archive/refs/heads/main.zip";
+            default "https://github.com/srl-labs/MultiCLI/archive/refs/tags/v1.0.0.zip";
             description "Repo URL - ZIP File";
         }
 

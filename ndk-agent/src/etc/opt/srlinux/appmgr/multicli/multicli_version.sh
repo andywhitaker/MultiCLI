@@ -1,3 +1,3 @@
 #!/bin/bash
 
-echo "v0.1.0"
+echo "v1.0.0"

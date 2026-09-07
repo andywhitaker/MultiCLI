@@ -2,3 +2,4 @@ __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+ndk-agent/*_[0-9]*_*.deb
