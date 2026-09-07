@@ -409,9 +409,14 @@ class CiscoInterfaceReports:
                 po_flag = "U" if oper == "up" else "D"
                 po_full = f"{po_name}({po_flag})"
 
+                proto_val = "NONE"
                 members = []
                 if hasattr(intf, 'lag') and intf.lag.exists():
                     lag_node = intf.lag.get()
+                    if hasattr(lag_node, 'lacp') and lag_node.lacp.exists():
+                        proto_val = "LACP"
+                    elif hasattr(lag_node, 'lag_type') and str(getattr(lag_node, 'lag_type', '')).lower() == 'lacp':
+                        proto_val = "LACP"
                     if hasattr(lag_node, 'member_interface'):
                         for mem in lag_node.member_interface.items():
                             m_name = format_cisco_intf(mem.name, short=True)
@@ -420,7 +425,7 @@ class CiscoInterfaceReports:
                             members.append(f"{m_name}({m_flag})")
 
                 m_str = "    ".join(members) if members else "--"
-                lines.append(f"{lag_num:<5} {po_full:<11} {'Eth':<8} {'LACP':<9} {m_str}")
+                lines.append(f"{lag_num:<5} {po_full:<11} {'Eth':<8} {proto_val:<9} {m_str}")
         except Exception:
             pass
 

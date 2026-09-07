@@ -129,18 +129,25 @@ class JunosRoutingReports:
         lines = [
             f"{'Routing instance':<23} {'VLAN name':<21} {'Tag':<8} {'Interfaces'}"
         ]
+        intfs_by_ni = {}
+        try:
+            intf_p = build_path('/network-instance[name=*]/interface[name=*]')
+            intf_data = state.server_data_store.get_data(intf_p, recursive=False)
+            for ni in intf_data.network_instance.items():
+                if hasattr(ni, 'interface'):
+                    intfs_by_ni[ni.name] = [format_junos_intf(intf.name, with_unit=True) for intf in ni.interface.items()]
+        except Exception:
+            pass
+
         path = build_path('/network-instance[name=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server_data_store.get_data(path, recursive=False)
             for ni in sorted(data.network_instance.items(), key=lambda x: str(x.name)):
                 ni_type = getattr(ni, 'type', '')
                 if ni_type != 'mac-vrf':
                     continue
                 name = ni.name
-                intfs = []
-                if hasattr(ni, 'interface'):
-                    for intf in ni.interface.items():
-                        intfs.append(format_junos_intf(intf.name, with_unit=True))
+                intfs = intfs_by_ni.get(name, [])
 
                 vlan_tag = "--"
                 for intf in intfs:
@@ -192,8 +199,8 @@ class JunosRoutingReports:
                         aggr = "Yes"
                         timeout = "Fast"
                         activity = "Active" if oper == "up" else "Down"
-                        rx_state = "Current"
-                        tx_state = "Fast periodic"
+                        rx_state = "Current" if oper == "up" else "Port disabled"
+                        tx_state = "Fast periodic" if oper == "up" else "No periodic"
                         mux_state = "Collecting distributing" if oper == "up" else "Detached"
 
                         lacp_obj = getattr(mem, 'lacp', None)
@@ -240,12 +247,19 @@ class JunosRoutingReports:
         router_id = "--"
 
         # Query BGP AS and router ID
-        path_ni = build_path('/network-instance[name=default]')
         try:
-            data_ni = state.server_data_store.get_data(path_ni, recursive=True)
+            path_ni = build_path('/network-instance[name=default]')
+            data_ni = state.server_data_store.get_data(path_ni, recursive=False)
             for ni in data_ni.network_instance.items():
                 if hasattr(ni, 'router_id') and ni.router_id:
                     router_id = str(ni.router_id)
+        except Exception:
+            pass
+
+        try:
+            path_bgp = build_path('/network-instance[name=default]/protocols/bgp')
+            data_bgp = state.server_data_store.get_data(path_bgp, recursive=False)
+            for ni in data_bgp.network_instance.items():
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
                     bgp = getattr(ni.protocols.get(), 'bgp', None)
                     if bgp:
@@ -266,7 +280,7 @@ class JunosRoutingReports:
 
         path_routes = build_path('/network-instance[name=default]/route-table/ipv4-unicast/route[ipv4-prefix=*]')
         try:
-            data_routes = state.server_data_store.get_data(path_routes, recursive=True)
+            data_routes = state.server_data_store.get_data(path_routes, recursive=False)
             for r in data_routes.get_descendants('/network-instance/route-table/ipv4-unicast/route'):
                 total_routes += 1
                 rtype = str(getattr(r, 'route_type', '')).lower()

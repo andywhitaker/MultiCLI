@@ -13,7 +13,7 @@ class CiscoLldpReports:
 
     def _get_capability_code(self, neighbor):
         if not hasattr(neighbor, 'capability') or not neighbor.capability:
-            return "B,R"
+            return "--"
         caps = []
         c = neighbor.capability
         if hasattr(c, 'router') and c.router:
@@ -26,7 +26,7 @@ class CiscoLldpReports:
             caps.append("W")
         if hasattr(c, 'station') and c.station:
             caps.append("S")
-        return "".join(caps) if caps else "BR"
+        return "".join(caps) if caps else "--"
 
     def show_lldp_neighbors(self, state, output, detail=False):
         """Display Cisco NX-OS style 'show lldp neighbors' or 'detail'."""
@@ -84,7 +84,7 @@ class CiscoLldpReports:
                 lines.append(f"Local Port id: {e['local_intf']}")
                 lines.append(f"System Name: {e['device_id']}")
                 lines.append(f"System Description: {e['desc']}")
-                lines.append(f"Enabled Capabilities: {', '.join(list(e['cap'])) if e['cap'] else 'B, R'}")
+                lines.append(f"Enabled Capabilities: {', '.join(list(e['cap'])) if e['cap'] != '--' else 'none'}")
                 lines.append(f"Management Address: {e['mgmt_ip'] if e['mgmt_ip'] else 'not advertised'}")
                 lines.append("")
             output.print_line("\n".join(lines).rstrip())

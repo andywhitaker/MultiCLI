@@ -215,48 +215,57 @@ class AristaRoutingReports:
             f"  {'Vrf':<9} {'RD':<14} {'Protocols':<14} {'State':<19} {'Interfaces'}",
             f"--------- -------------- -------------- ------------------- ---------------------"
         ]
+        rd_by_ni = {}
+        try:
+            bv_p = build_path('/network-instance[name=*]/protocols/bgp-vpn')
+            bv_data = state.server_data_store.get_data(bv_p, recursive=True)
+            for ni in bv_data.network_instance.items():
+                if hasattr(ni, 'protocols') and ni.protocols.exists():
+                    p_obj = ni.protocols.get()
+                    bgp_vpn = getattr(p_obj, 'bgp_vpn', None)
+                    if bgp_vpn and hasattr(bgp_vpn, 'exists') and bgp_vpn.exists():
+                        bv_obj = bgp_vpn.get()
+                        if hasattr(bv_obj, 'bgp_instance'):
+                            for bi in bv_obj.bgp_instance.items():
+                                rd_val = getattr(bi, 'route_distinguisher', None)
+                                if rd_val:
+                                    m = re.search(r'rd\s+([0-9\.:]+)', str(rd_val))
+                                    if m:
+                                        rd_by_ni[ni.name] = m.group(1)
+                                    else:
+                                        rd_by_ni[ni.name] = str(getattr(rd_val, 'rd', rd_val)).strip()
+                                    break
+        except Exception:
+            pass
+
+        intfs_by_ni = {}
+        try:
+            intf_p = build_path('/network-instance[name=*]/interface[name=*]')
+            intf_data = state.server_data_store.get_data(intf_p, recursive=False)
+            for ni in intf_data.network_instance.items():
+                if hasattr(ni, 'interface'):
+                    intfs_by_ni[ni.name] = [format_arista_intf(intf.name, short=False) for intf in ni.interface.items()]
+        except Exception:
+            pass
+
         path = build_path('/network-instance[name=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server_data_store.get_data(path, recursive=False)
             for ni in sorted(data.network_instance.items(), key=lambda x: str(x.name)):
                 try:
                     name = ni.name
                     ni_type = getattr(ni, 'type', 'default')
-                    rd = "-"
+                    rd = rd_by_ni.get(name, "-")
 
-                    if hasattr(ni, 'protocols') and ni.protocols.exists():
-                        p_obj = ni.protocols.get()
-                        bgp_vpn = getattr(p_obj, 'bgp_vpn', None)
-                        if bgp_vpn and hasattr(bgp_vpn, 'exists') and bgp_vpn.exists():
-                            bv_obj = bgp_vpn.get()
-                            if hasattr(bv_obj, 'bgp_instance'):
-                                for bi in bv_obj.bgp_instance.items():
-                                    rd_val = getattr(bi, 'route_distinguisher', None)
-                                    if rd_val:
-                                        m = re.search(r'rd\s+([0-9\.:]+)', str(rd_val))
-                                        if m:
-                                            rd = m.group(1)
-                                        else:
-                                            rd = str(getattr(rd_val, 'rd', rd_val)).strip()
-                                        break
-
-                    # Interfaces
-                    intfs = []
-                    has_v4 = False
-                    has_v6 = False
-                    if hasattr(ni, 'interface'):
-                        for intf in ni.interface.items():
-                            intfs.append(format_arista_intf(intf.name, short=False))
+                    intfs = intfs_by_ni.get(name, [])
 
                     if ni_type == 'mac-vrf':
                         proto_str = "-"
                         v4_state = "v4:no routing,"
                         v6_state = "v6:no routing"
                     else:
-                        has_v4 = True
+                        has_v4 = bool(intfs)
                         has_v6 = False
-                        if hasattr(ni, 'interface'):
-                            has_v4 = True
                         protos = ['ipv4']
                         if has_v6:
                             protos.append('ipv6')
@@ -282,9 +291,19 @@ class AristaRoutingReports:
             f"{'VLAN':<5} {'Name':<32} {'Status':<9} {'Ports'}",
             f"----- -------------------------------- --------- -------------------------------"
         ]
+        intfs_by_ni = {}
+        try:
+            intf_p = build_path('/network-instance[name=*]/interface[name=*]')
+            intf_data = state.server_data_store.get_data(intf_p, recursive=False)
+            for ni in intf_data.network_instance.items():
+                if hasattr(ni, 'interface'):
+                    intfs_by_ni[ni.name] = [format_arista_intf(intf.name, short=True) for intf in ni.interface.items()]
+        except Exception:
+            pass
+
         path = build_path('/network-instance[name=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server_data_store.get_data(path, recursive=False)
             for ni in sorted(data.network_instance.items(), key=lambda x: str(x.name)):
                 ni_type = getattr(ni, 'type', '')
                 if ni_type != 'mac-vrf':
@@ -293,10 +312,7 @@ class AristaRoutingReports:
                 oper = getattr(ni, 'oper_state', 'up')
                 status = "active" if oper == "up" else "suspended"
 
-                ports = []
-                if hasattr(ni, 'interface'):
-                    for intf in ni.interface.items():
-                        ports.append(format_arista_intf(intf.name, short=True))
+                ports = intfs_by_ni.get(name, [])
 
                 vlan_tag = "--"
                 for p in ports:

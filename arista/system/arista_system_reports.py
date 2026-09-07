@@ -41,6 +41,7 @@ class AristaSystemReports:
         chassis_type = "Chassis"
         hw_mac = ""
         serial_number = ""
+        part_number = ""
         chassis_path = build_path('/platform/chassis')
         try:
             chassis_data = state.server_data_store.get_data(chassis_path, recursive=True)
@@ -51,6 +52,8 @@ class AristaSystemReports:
                 hw_mac = format_mac_cisco_arista(ch.hw_mac_address)
             if hasattr(ch, 'serial_number') and ch.serial_number:
                 serial_number = str(ch.serial_number)
+            if hasattr(ch, 'part_number') and ch.part_number:
+                part_number = str(ch.part_number)
         except Exception:
             pass
 
@@ -103,7 +106,7 @@ class AristaSystemReports:
 
         lines = [
             f"{chassis_type}",
-            f"Hardware version:    ",
+            f"Hardware version:    {part_number or '--'}",
             f"Serial number:       {serial_number}",
             f"System MAC address:  {hw_mac}",
             f"",
@@ -201,7 +204,7 @@ class AristaSystemReports:
         try:
             psu_path = build_path('/platform/power-supply[id=*]')
             psu_data = state.server_data_store.get_data(psu_path, recursive=True)
-            psus = list(psu_data.platform.get().power_supply.items())
+            psus = [p for p in psu_data.platform.get().power_supply.items() if getattr(p, 'oper_state', '') != 'empty']
             if psus:
                 lines.append(f"System has {len(psus)} power supply slot{'s' if len(psus) != 1 else ''}")
                 lines.append(f" Slot Model            Serial Number")
@@ -218,7 +221,7 @@ class AristaSystemReports:
         try:
             fan_path = build_path('/platform/fan-tray[id=*]')
             fan_data = state.server_data_store.get_data(fan_path, recursive=True)
-            fans = list(fan_data.platform.get().fan_tray.items())
+            fans = [f for f in fan_data.platform.get().fan_tray.items() if getattr(f, 'oper_state', '') != 'empty']
             if fans:
                 lines.append(f"System has {len(fans)} fan module{'s' if len(fans) != 1 else ''}")
                 lines.append(f" Module Number of Fans Model            Serial Number")

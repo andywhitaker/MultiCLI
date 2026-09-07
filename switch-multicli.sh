@@ -83,15 +83,16 @@ esac
 echo "==> Configuring node '$TARGET_NODE' with $NOS_NAME persona..."
 
 if [ "$USE_DOCKER_CP" = true ]; then
-    # Clean in container (selective removal of MultiCLI components only)
-    docker exec "$TARGET_NODE" bash -c 'rm -rf /etc/opt/srlinux/cli/plugins/main_{arista,cisco,juniper}.py /etc/opt/srlinux/cli/{system,routing,interface,ip,mac,eth_switch,bgp,README.md} 2>/dev/null || true; mkdir -p /etc/opt/srlinux/cli/plugins'
+    # Clean in container (selective removal of MultiCLI components and legacy plugins)
+    docker exec "$TARGET_NODE" bash -c 'rm -rf /etc/opt/srlinux/cli/plugins/{main_{arista,cisco,juniper}.py,ip_reports.py,mac_reports.py,Cisco_nxos_lldp_neighbor,ethernet_switching_reports.py,show_interfaces.py} /etc/opt/srlinux/cli/{system,routing,interface,ip,mac,eth_switch,bgp,README.md} 2>/dev/null || true; find /etc/opt/srlinux/cli -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true; mkdir -p /etc/opt/srlinux/cli/plugins'
     # Copy files into container
     docker cp "$SOURCE_DIR"/. "$TARGET_NODE":/etc/opt/srlinux/cli/
     echo "==> Successfully installed $NOS_NAME to $TARGET_NODE via docker cp."
 else
-    # Clean existing MultiCLI components in target node config/cli
+    # Clean existing MultiCLI components and legacy plugins in target node config/cli
     mkdir -p "$TARGET_CLI_DIR"/plugins
-    rm -rf "$TARGET_CLI_DIR"/plugins/main_{arista,cisco,juniper}.py "$TARGET_CLI_DIR"/system "$TARGET_CLI_DIR"/routing "$TARGET_CLI_DIR"/interface "$TARGET_CLI_DIR"/ip "$TARGET_CLI_DIR"/mac "$TARGET_CLI_DIR"/eth_switch "$TARGET_CLI_DIR"/bgp "$TARGET_CLI_DIR"/README.md 2>/dev/null || true
+    rm -rf "$TARGET_CLI_DIR"/plugins/main_{arista,cisco,juniper}.py "$TARGET_CLI_DIR"/plugins/{ip_reports.py,mac_reports.py,Cisco_nxos_lldp_neighbor,ethernet_switching_reports.py,show_interfaces.py} "$TARGET_CLI_DIR"/system "$TARGET_CLI_DIR"/routing "$TARGET_CLI_DIR"/interface "$TARGET_CLI_DIR"/ip "$TARGET_CLI_DIR"/mac "$TARGET_CLI_DIR"/eth_switch "$TARGET_CLI_DIR"/bgp "$TARGET_CLI_DIR"/README.md 2>/dev/null || true
+    find "$TARGET_CLI_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
     mkdir -p "$TARGET_CLI_DIR"/plugins
 
     # Copy vendor suite

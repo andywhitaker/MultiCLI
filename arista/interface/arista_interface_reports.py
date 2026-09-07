@@ -160,7 +160,7 @@ class AristaInterfaceReports:
         rows = []
         path = build_path('/interface[name=*]')
         try:
-            intf_data = state.server_data_store.get_data(path, recursive=True)
+            intf_data = state.server_data_store.get_data(path, recursive=False)
             for intf in intf_data.interface.items():
                 name = intf.name
                 admin_state = getattr(intf, 'admin_state', 'disable')
@@ -252,7 +252,7 @@ class AristaInterfaceReports:
             minutes, seconds = divmod(rem, 60)
             last_change_str = f"{hours}:{minutes:02d}:{seconds:02d} ago"
         else:
-            last_change_str = "0:01:00 ago"
+            last_change_str = "never"
 
         lines = []
         if not detail:

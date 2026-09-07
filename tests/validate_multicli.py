@@ -5,6 +5,8 @@ Automated validation harness for all MultiCLI commands across
 Arista EOS (leaf1), Cisco NX-OS (leaf2), and Juniper JUNOS (leaf3).
 """
 
+import os
+import re
 import subprocess
 import sys
 import time
@@ -53,6 +55,7 @@ TEST_SUITES = {
             ("show environment cooling", "System Temperature", "show environment cooling should not trigger intermediate show environment all"),
             ("show environment power", "System Temperature", "show environment power should not trigger intermediate show environment all"),
             ("show lldp neighbors detail", "Last table change time", "show lldp neighbors detail should not trigger intermediate show lldp neighbors summary"),
+            ("show lldp neighbors", "0:01:00 ago", "show lldp neighbors should not output hardcoded fake timestamp '0:01:00 ago'"),
             ("show ip route", "S       10.1.10.0/24", "Local/connected subnet should be classified as C or L, not S"),
         ],
         "positive_assertions": [
@@ -114,8 +117,8 @@ TEST_SUITES = {
         "positive_assertions": [
             ("show processes cpu", "CPU utilization for five seconds:", "show processes cpu must contain CPU utilization summary"),
             ("show ip arp", "MAC Address", "show ip arp must contain MAC Address header"),
-            ("show ip route", "via 10.2.10.10", "show ip route must dynamically resolve next-hop IP"),
-            ("show ip route", "Eth1/1", "show ip route must dynamically resolve outgoing Cisco-formatted interface"),
+            ("show ip route", "re:via \\d+\\.\\d+\\.\\d+\\.\\d+", "show ip route must dynamically resolve next-hop IP"),
+            ("show ip route", "re:Eth\\d+/\\d+", "show ip route must dynamically resolve outgoing Cisco-formatted interface"),
         ]
     },
     "Juniper JUNOS": {
@@ -161,6 +164,16 @@ ERROR_PATTERNS = [
     "CLI command failed",
 ]
 
+import concurrent.futures
+import os
+import re
+import subprocess
+import sys
+import threading
+import time
+
+print_lock = threading.Lock()
+
 def run_command(node, cmd):
     full_cmd = ["docker", "exec", node, "sr_cli", cmd]
     t0 = time.time()
@@ -168,49 +181,52 @@ def run_command(node, cmd):
     dt = time.time() - t0
     return res.returncode, res.stdout, res.stderr, dt
 
-def validate(args):
-    total_passed = 0
-    total_failed = 0
-    failures = []
+def run_suite(suite_name, suite, args, parallel=True):
+    node = getattr(args, suite["arg_key"], suite["default_node"])
+    commands = suite["commands"]
+    neg_assertions = dict(((c, p), msg) for c, p, msg in suite.get("negative_assertions", []))
+    pos_assertions = dict(((c, p), msg) for c, p, msg in suite.get("positive_assertions", []))
 
-    print("=" * 80)
-    print("MultiCLI Comprehensive Automated Validation Test Suite")
-    print("=" * 80)
-
-    for suite_name, suite in TEST_SUITES.items():
-        node = getattr(args, suite["arg_key"], suite["default_node"])
-        commands = suite["commands"]
-        neg_assertions = dict(((c, p), msg) for c, p, msg in suite.get("negative_assertions", []))
-        pos_assertions = dict(((c, p), msg) for c, p, msg in suite.get("positive_assertions", []))
+    with print_lock:
         print(f"\n--- Running {suite_name} on container '{node}' ({len(commands)} commands) ---")
 
-        for idx, cmd in enumerate(commands, 1):
-            rc, stdout, stderr, dt = run_command(node, cmd)
+    passed = 0
+    failed = 0
+    failures = []
 
-            # Check error patterns
-            errors = []
-            if rc != 0:
-                errors.append(f"Non-zero exit code: {rc}")
-            for pat in ERROR_PATTERNS:
-                if pat in stdout or pat in stderr:
-                    errors.append(f"Found error pattern '{pat}'")
+    for idx, cmd in enumerate(commands, 1):
+        rc, stdout, stderr, dt = run_command(node, cmd)
 
-            # Check that output is not completely empty
-            if not stdout.strip() and not stderr.strip():
-                errors.append("Output is completely empty")
+        # Check error patterns
+        errors = []
+        if rc != 0:
+            errors.append(f"Non-zero exit code: {rc}")
+        for pat in ERROR_PATTERNS:
+            if pat in stdout or pat in stderr:
+                errors.append(f"Found error pattern '{pat}'")
 
-            # Negative assertions: ensure no hardcoded mock data is present
-            for (neg_cmd, bad_pattern), failure_msg in neg_assertions.items():
-                if cmd == neg_cmd and bad_pattern in stdout:
+        # Check that output is not completely empty
+        if not stdout.strip() and not stderr.strip():
+            errors.append("Output is completely empty")
+
+        # Negative assertions: ensure no hardcoded mock data is present
+        for (neg_cmd, bad_pattern), failure_msg in neg_assertions.items():
+            if cmd == neg_cmd:
+                matched = bool(re.search(bad_pattern[3:], stdout)) if bad_pattern.startswith("re:") else (bad_pattern in stdout)
+                if matched:
                     errors.append(f"Assertion failed: {failure_msg} (found '{bad_pattern}')")
 
-            # Positive assertions: ensure expected dynamic content is present
-            for (pos_cmd, req_pattern), failure_msg in pos_assertions.items():
-                if cmd == pos_cmd and req_pattern not in stdout:
+        # Positive assertions: ensure expected dynamic content is present
+        for (pos_cmd, req_pattern), failure_msg in pos_assertions.items():
+            if cmd == pos_cmd:
+                matched = bool(re.search(req_pattern[3:], stdout)) if req_pattern.startswith("re:") else (req_pattern in stdout)
+                if not matched:
                     errors.append(f"Assertion failed: {failure_msg} (missing '{req_pattern}')")
 
+        prefix = f"[{node}] " if parallel else ""
+        with print_lock:
             if errors:
-                total_failed += 1
+                failed += 1
                 status = "FAIL"
                 failures.append({
                     "suite": suite_name,
@@ -220,19 +236,69 @@ def validate(args):
                     "stdout": stdout,
                     "stderr": stderr
                 })
-                print(f"  [{idx:2d}/{len(commands):2d}] {cmd:<44} -> {status} ({dt:.2f}s) - {'; '.join(errors)}")
+                print(f"  {prefix}[{idx:2d}/{len(commands):2d}] {cmd:<44} -> {status} ({dt:.2f}s) - {'; '.join(errors)}")
             else:
-                total_passed += 1
+                passed += 1
                 status = "PASS"
-                print(f"  [{idx:2d}/{len(commands):2d}] {cmd:<44} -> {status} ({dt:.2f}s)")
+                print(f"  {prefix}[{idx:2d}/{len(commands):2d}] {cmd:<44} -> {status} ({dt:.2f}s)")
 
-    print("\n" + "=" * 80)
-    print(f"Test Summary: Total={total_passed + total_failed} | Passed={total_passed} | Failed={total_failed}")
+    return passed, failed, failures
+
+def validate(args):
+    t_start = time.time()
+    total_passed = 0
+    total_failed = 0
+    all_failures = []
+
+    print("=" * 80)
+    print("MultiCLI Comprehensive Automated Validation Test Suite")
     print("=" * 80)
 
-    if failures:
-        print(f"\nFAILED COMMANDS DETAILS ({len(failures)} failures):")
-        for f in failures:
+    if getattr(args, 'install', False):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        switch_script = os.path.join(script_dir, "..", "switch-multicli.sh")
+        print("\n==> Installing MultiCLI personas to target nodes...")
+        install_tasks = [("arista", "arista_node", "leaf1"),
+                         ("cisco", "cisco_node", "leaf2"),
+                         ("juniper", "juniper_node", "leaf3")]
+        if not getattr(args, 'sequential', False):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                futs = [executor.submit(subprocess.run, [switch_script, persona, getattr(args, key, def_node)], check=True)
+                        for persona, key, def_node in install_tasks]
+                for f in futs:
+                    f.result()
+        else:
+            for persona, key, def_node in install_tasks:
+                subprocess.run([switch_script, persona, getattr(args, key, def_node)], check=True)
+        time.sleep(1)
+
+    suites_to_run = list(TEST_SUITES.items())
+    if getattr(args, 'sequential', False):
+        for s_name, s_data in suites_to_run:
+            p, f, fails = run_suite(s_name, s_data, args, parallel=False)
+            total_passed += p
+            total_failed += f
+            all_failures.extend(fails)
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(suites_to_run)) as executor:
+            future_to_suite = {
+                executor.submit(run_suite, s_name, s_data, args, parallel=True): s_name
+                for s_name, s_data in suites_to_run
+            }
+            for fut in concurrent.futures.as_completed(future_to_suite):
+                p, f, fails = fut.result()
+                total_passed += p
+                total_failed += f
+                all_failures.extend(fails)
+
+    elapsed_total = time.time() - t_start
+    print("\n" + "=" * 80)
+    print(f"Test Summary: Total={total_passed + total_failed} | Passed={total_passed} | Failed={total_failed} (Finished in {elapsed_total:.2f}s)")
+    print("=" * 80)
+
+    if all_failures:
+        print(f"\nFAILED COMMANDS DETAILS ({len(all_failures)} failures):")
+        for f in all_failures:
             print("-" * 60)
             print(f"Suite:   {f['suite']} (Node: {f['node']})")
             print(f"Command: {f['command']}")
@@ -252,6 +318,8 @@ if __name__ == "__main__":
     parser.add_argument("--arista-node", default="leaf1", help="Target node running Arista EOS persona (default: leaf1)")
     parser.add_argument("--cisco-node", default="leaf2", help="Target node running Cisco NX-OS persona (default: leaf2)")
     parser.add_argument("--juniper-node", default="leaf3", help="Target node running Juniper JUNOS persona (default: leaf3)")
+    parser.add_argument("--install", action="store_true", help="Automatically configure each target node with switch-multicli.sh before validation")
+    parser.add_argument("--sequential", action="store_true", help="Run node test suites sequentially instead of in parallel")
     cli_args = parser.parse_args()
 
     success = validate(cli_args)

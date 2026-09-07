@@ -48,9 +48,19 @@ class CiscoRoutingReports:
             f"{'VLAN':<5} {'Name':<32} {'Status':<9} {'Ports'}",
             f"----- -------------------------------- --------- -------------------------------"
         ]
+        intfs_by_ni = {}
+        try:
+            intf_p = build_path('/network-instance[name=*]/interface[name=*]')
+            intf_data = state.server_data_store.get_data(intf_p, recursive=False)
+            for ni in intf_data.network_instance.items():
+                if hasattr(ni, 'interface'):
+                    intfs_by_ni[ni.name] = [format_cisco_intf(intf.name, short=True) for intf in ni.interface.items()]
+        except Exception:
+            pass
+
         path = build_path('/network-instance[name=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server_data_store.get_data(path, recursive=False)
             for ni in sorted(data.network_instance.items(), key=lambda x: str(x.name)):
                 ni_type = getattr(ni, 'type', '')
                 if ni_type != 'mac-vrf':
@@ -59,10 +69,7 @@ class CiscoRoutingReports:
                 oper = getattr(ni, 'oper_state', 'up')
                 status = "active" if oper == "up" else "suspend"
 
-                ports = []
-                if hasattr(ni, 'interface'):
-                    for intf in ni.interface.items():
-                        ports.append(format_cisco_intf(intf.name, short=True))
+                ports = intfs_by_ni.get(name, [])
 
                 vlan_tag = "--"
                 for p in ports:
@@ -327,14 +334,14 @@ class CiscoRoutingReports:
         ]
         vxlan_to_ni = {}
         try:
-            ni_data = state.server_data_store.get_data(build_path('/network-instance[name=*]'), recursive=True)
-            for ni in ni_data.network_instance.items():
-                ni_name = ni.name
-                ni_type = getattr(ni, 'type', 'default')
-                vni_type = "L2" if ni_type == 'mac-vrf' else "L3"
+            ni_data = state.server_data_store.get_data(build_path('/network-instance[name=*]'), recursive=False)
+            ni_types = {ni.name: ("L2" if getattr(ni, 'type', 'default') == 'mac-vrf' else "L3") for ni in ni_data.network_instance.items()}
+            vxi_data = state.server_data_store.get_data(build_path('/network-instance[name=*]/vxlan-interface[name=*]'), recursive=False)
+            for ni in vxi_data.network_instance.items():
+                vni_type = ni_types.get(ni.name, "L2")
                 if hasattr(ni, 'vxlan_interface'):
                     for vxi in ni.vxlan_interface.items():
-                        vxlan_to_ni[vxi.name] = (ni_name, vni_type)
+                        vxlan_to_ni[vxi.name] = (ni.name, vni_type)
         except Exception:
             pass
 
