@@ -62,7 +62,9 @@ TEST_SUITES = {
             ("show lldp neighbors", "0:01:00 ago", "show lldp neighbors should not output hardcoded fake timestamp '0:01:00 ago'"),
             ("show ip route", "S       10.1.10.0/24", "Local/connected subnet should be classified as C or L, not S"),
             ("show vlan", "--    app", "show vlan should dynamically derive VLAN tag rather than '--'"),
+            ("show vlan", "Vlan1", "show vlan should not convert IRB interface to Vlan1"),
             ("show mac address-table", "Vlan--", "show mac address-table should not output 'Vlan--'"),
+            ("show mac address-table", "Vlan1", "show mac address-table should not convert IRB interface to Vlan1"),
         ],
         "positive_assertions": [
             ("show ip route", "Gateway of last resort", "show ip route must contain Gateway of last resort header"),
@@ -70,8 +72,9 @@ TEST_SUITES = {
             ("show interfaces status", "Ethernet1/1", "show interfaces status must format interfaces in Arista style EthernetX/Y"),
             ("show ip bgp vrf default summary", "BGP summary information for VRF default", "show ip bgp vrf default summary must output VRF BGP summary"),
             ("show vlan", "1     app", "show vlan must dynamically resolve VLAN 1 for app"),
+            ("show vlan", "irb0.1", "show vlan must preserve irb0.1 interface name"),
             ("show mac address-table", "1       0000.5e00.0101", "show mac address-table must dynamically resolve VLAN 1 for IRB MAC"),
-            ("show mac address-table", "Vlan1", "show mac address-table must format IRB port as Vlan1"),
+            ("show mac address-table", "irb0.1", "show mac address-table must format IRB port as irb0.1"),
         ]
     },
     "Cisco NX-OS": {
@@ -129,6 +132,9 @@ TEST_SUITES = {
             ("show ip route", "ethernet-1/1.0", "show ip route should format interface as Eth1/1 rather than ethernet-1/1.0"),
             ("show mac address-table vlan 1", "irb0.2", "show mac address-table vlan 1 should not leak non-matching VLAN 2 entries (irb0.2)"),
             ("show mac address-table vlan 10", "irb0.1", "show mac address-table vlan 10 should not return non-matching entries"),
+            ("show vlan", "--    app", "show vlan should dynamically derive VLAN tag rather than '--'"),
+            ("show vlan", "Vlan0.", "show vlan should not output synthetic 'Vlan0.' interface names"),
+            ("show vlan", "Vlan1", "show vlan should not convert IRB interface to Vlan1"),
         ],
         "positive_assertions": [
             ("show processes cpu", "CPU utilization for five seconds:", "show processes cpu must contain CPU utilization summary"),
@@ -137,6 +143,8 @@ TEST_SUITES = {
             ("show ip route", "re:via \\d+\\.\\d+\\.\\d+\\.\\d+", "show ip route must dynamically resolve next-hop IP"),
             ("show ip route", "re:Eth\\d+/\\d+", "show ip route must dynamically resolve outgoing Cisco-formatted interface"),
             ("show ip bgp vrf default summary", "BGP summary information for VRF default", "show ip bgp vrf default summary must output VRF BGP summary"),
+            ("show vlan", "1     app", "show vlan must dynamically resolve VLAN 1 for app"),
+            ("show vlan", "irb0.1", "show vlan must preserve irb0.1 interface name"),
             ("show mac address-table", "1   00:00:5E:00:01:01", "show mac address-table must show dynamic VLAN 1 for app MAC"),
             ("show mac address-table vlan 1", "irb0.1(R)", "show mac address-table vlan 1 must return matching VLAN 1 entries"),
         ]

@@ -36,8 +36,10 @@ except ImportError:
         elif name.startswith('lag'):
             num = name.split('lag', 1)[1]
             return f"Po{num}" if short else f"Port-channel{num}"
-        elif name.startswith(('irb', 'vlan')):
-            num = re.split(r'irb|vlan', name)[-1]
+        elif name.startswith('irb'):
+            return name
+        elif name.startswith('vlan'):
+            num = re.split(r'vlan', name)[-1]
             return f"Vlan{num}"
         return name
 

@@ -29,8 +29,7 @@ def format_cisco_intf(name, short=True):
         num = name.split('lag', 1)[1]
         return f"Po{num}" if short else f"Port-channel{num}"
     elif name.startswith('irb'):
-        num = name.split('irb', 1)[1]
-        return f"Vlan{num}"
+        return name
     elif name.startswith('vlan'):
         num = name.split('vlan', 1)[1]
         return f"Vlan{num}"
@@ -417,12 +416,16 @@ class CiscoInterfaceReports:
                         proto_val = "LACP"
                     elif hasattr(lag_node, 'lag_type') and str(getattr(lag_node, 'lag_type', '')).lower() == 'lacp':
                         proto_val = "LACP"
-                    if hasattr(lag_node, 'member_interface'):
-                        for mem in lag_node.member_interface.items():
-                            m_name = format_cisco_intf(mem.name, short=True)
-                            m_oper = getattr(mem, 'oper_state', 'down')
-                            m_flag = "P" if m_oper == "up" else "D"
-                            members.append(f"{m_name}({m_flag})")
+                    mem_items = []
+                    if hasattr(lag_node, 'member'):
+                        mem_items = lag_node.member.items()
+                    elif hasattr(lag_node, 'member_interface'):
+                        mem_items = lag_node.member_interface.items()
+                    for mem in mem_items:
+                        m_name = format_cisco_intf(mem.name, short=True)
+                        m_oper = getattr(mem, 'oper_state', 'down')
+                        m_flag = "P" if m_oper == "up" else "D"
+                        members.append(f"{m_name}({m_flag})")
 
                 m_str = "    ".join(members) if members else "--"
                 lines.append(f"{lag_num:<5} {po_full:<11} {'Eth':<8} {proto_val:<9} {m_str}")

@@ -37,10 +37,7 @@ def format_arista_intf(name, short=False):
         num = name.replace('system', '').replace('lo', '') or '0'
         return f"Lo{num}" if short else f"Loopback{num}"
     if name.startswith('irb'):
-        num = name.replace('irb', '')
-        if '.' in num:
-            num = num.split('.', 1)[1]
-        return f"Vlan{num}"
+        return name
     return name
 
 class AristaRoutingReports:
@@ -372,12 +369,14 @@ class AristaRoutingReports:
             f"{'----':<7} {'-----------':<17} {'----':<11} {'-----':<10} {'-----':<7} {'---------'}"
         ]
         vlan_by_ni = {}
+        ports_by_ni = {}
         try:
             intf_p = build_path('/network-instance[name=*]/interface[name=*]')
             intf_data = state.server_data_store.get_data(intf_p, recursive=False)
             for ni in intf_data.network_instance.items():
                 if hasattr(ni, 'interface'):
                     raw_ports = [intf.name for intf in ni.interface.items()]
+                    ports_by_ni[ni.name] = raw_ports
                     vlan_by_ni[ni.name] = self._get_vlan_for_ni(state, raw_ports)
         except Exception:
             pass
@@ -407,7 +406,9 @@ class AristaRoutingReports:
                         else:
                             port = 'VxLAN'
                     elif 'irb' in dest.lower():
-                        port = f"Vlan{ni_vlan}" if ni_vlan != "--" else "Vlan"
+                        ni_ports = ports_by_ni.get(ni_name, [])
+                        irb_ports = [p for p in ni_ports if 'irb' in p]
+                        port = irb_ports[0] if irb_ports else "irb"
                     else:
                         port = format_arista_intf(dest.split()[0] if dest else "-", short=True)
                     lines.append(f"{vlan_str:<7} {mac_addr:<17} {mac_type:<11} {port:<10} {'--':<7} {'-'}")

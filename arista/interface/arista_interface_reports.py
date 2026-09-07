@@ -40,10 +40,7 @@ def format_arista_intf(name, short=False):
         num = name.replace('system', '') or '0'
         return f"Lo{num}" if short else f"Loopback{num}"
     if name.startswith('irb'):
-        num = name.replace('irb', '')
-        if '.' in num:
-            num = num.split('.', 1)[1]
-        return f"Vlan{num}"
+        return name
     return name
 
 def arista_intf_sort_key(name):
@@ -367,12 +364,16 @@ class AristaInterfaceReports:
                         proto_val = "LACP(a)"
                     elif hasattr(lag_obj, 'lag_type') and str(getattr(lag_obj, 'lag_type', '')).lower() == 'lacp':
                         proto_val = "LACP(a)"
-                    if hasattr(lag_obj, 'member_interface'):
-                        for m in lag_obj.member_interface.items():
-                            m_name = format_arista_intf(m.name, short=True)
-                            m_oper = getattr(m, 'oper_state', 'down')
-                            m_flag = "P" if m_oper == "up" else "D"
-                            members.append(f"{m_name}({m_flag})")
+                    mem_items = []
+                    if hasattr(lag_obj, 'member'):
+                        mem_items = lag_obj.member.items()
+                    elif hasattr(lag_obj, 'member_interface'):
+                        mem_items = lag_obj.member_interface.items()
+                    for m in mem_items:
+                        m_name = format_arista_intf(m.name, short=True)
+                        m_oper = getattr(m, 'oper_state', 'down')
+                        m_flag = "P" if m_oper == "up" else "D"
+                        members.append(f"{m_name}({m_flag})")
 
                 ports_str = " ".join(members) if members else "-"
                 lags.append({

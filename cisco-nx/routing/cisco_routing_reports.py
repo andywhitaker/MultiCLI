@@ -42,6 +42,42 @@ class CiscoRoutingReports:
         output.print_line("\n----------------------------------------------------------------------------------------------------")
         output.print_line("Try SR Linux command: show network-instance summary")
 
+    def _get_vlan_for_ni(self, state, raw_intfs):
+        """Extract VLAN ID for a mac-vrf network instance:
+        1. Check member subinterfaces' single-tagged VLAN encapsulation.
+        2. Fall back to IRB subinterface index (e.g. irb0.1 -> 1).
+        3. Fall back to subinterface index if > 0.
+        4. Fall back to '--'.
+        """
+        # 1. Single-tagged encapsulation from member subinterfaces
+        for intf_name in raw_intfs:
+            if '.' in intf_name and not intf_name.startswith('irb'):
+                p_name, sub_idx = intf_name.split('.', 1)
+                try:
+                    p = build_path(f'/interface[name={p_name}]/subinterface[index={sub_idx}]/vlan/encap/single-tagged/vlan-id')
+                    d = state.server_data_store.get_data(p, recursive=False)
+                    vlan_val = getattr(d.interface.get().subinterface.get().vlan.get().encap.get().single_tagged.get(), 'vlan_id', None)
+                    if vlan_val is not None:
+                        return str(vlan_val)
+                except Exception:
+                    pass
+
+        # 2. Fall back to IRB subinterface index
+        for intf_name in raw_intfs:
+            if 'irb' in intf_name:
+                m = re.search(r'irb\d*\.(\d+)', intf_name)
+                if m:
+                    return m.group(1)
+
+        # 3. Fall back to subinterface index if > 0
+        for intf_name in raw_intfs:
+            if '.' in intf_name:
+                sub_idx = intf_name.split('.', 1)[1]
+                if sub_idx != '0':
+                    return sub_idx
+
+        return "--"
+
     def show_vlan(self, state, output):
         """Display Cisco NX-OS style 'show vlan'."""
         lines = [
@@ -49,12 +85,15 @@ class CiscoRoutingReports:
             f"----- -------------------------------- --------- -------------------------------"
         ]
         intfs_by_ni = {}
+        vlan_by_ni = {}
         try:
             intf_p = build_path('/network-instance[name=*]/interface[name=*]')
             intf_data = state.server_data_store.get_data(intf_p, recursive=False)
             for ni in intf_data.network_instance.items():
                 if hasattr(ni, 'interface'):
-                    intfs_by_ni[ni.name] = [format_cisco_intf(intf.name, short=True) for intf in ni.interface.items()]
+                    raw_ports = [intf.name for intf in ni.interface.items()]
+                    intfs_by_ni[ni.name] = [format_cisco_intf(p, short=True) for p in raw_ports]
+                    vlan_by_ni[ni.name] = self._get_vlan_for_ni(state, raw_ports)
         except Exception:
             pass
 
@@ -70,12 +109,7 @@ class CiscoRoutingReports:
                 status = "active" if oper == "up" else "suspend"
 
                 ports = intfs_by_ni.get(name, [])
-
-                vlan_tag = "--"
-                for p in ports:
-                    if '.' in p:
-                        vlan_tag = p.split('.')[-1]
-                        break
+                vlan_tag = vlan_by_ni.get(name, "--")
 
                 ports_str = ", ".join(ports) if ports else "--"
                 lines.append(f"{str(vlan_tag):<5} {name:<32} {status:<9} {ports_str}")
