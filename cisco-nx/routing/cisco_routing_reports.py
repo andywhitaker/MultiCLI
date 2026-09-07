@@ -454,7 +454,7 @@ class CiscoRoutingReports:
                                 if hasattr(bi, 'ethernet_segment'):
                                     for es_idx, es in enumerate(bi.ethernet_segment.items(), 1):
                                         found = True
-                                        intf = getattr(es, 'interface', f'Po{es_idx}')
+                                        intf = getattr(es, 'interface', '') or '--'
                                         admin_st = getattr(es, 'admin_state', 'enable')
                                         oper_st = getattr(es, 'oper_state', 'down').lower()
                                         is_up = (admin_st == 'enable' and oper_st == 'up')
@@ -462,7 +462,7 @@ class CiscoRoutingReports:
                                             peer_link_up = True
                                         vpc_rows.append({
                                             'id': str(es_idx),
-                                            'port': format_cisco_intf(intf, short=True),
+                                            'port': format_cisco_intf(intf, short=True) if intf != '--' else '--',
                                             'status': 'Up' if is_up else 'Down',
                                             'att': '1' if is_up else '0',
                                             'consistency': 'Passed' if is_up else 'Failed'

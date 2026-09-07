@@ -199,6 +199,11 @@ class EthernetSwitchingReport:
         return interface_name_index_list
     
     def _find_vlan(self, interfaces, query):
+        if not query:
+            return "-"
+        m_irb = re.search(r'irb\d*\.(\d+)', query)
+        if m_irb:
+            return m_irb.group(1)
         # Extract interface name and index using regex
         match = re.match(r'(.+)\.(\d+)', query)
         if not match:
@@ -209,7 +214,10 @@ class EthernetSwitchingReport:
         # Search for the matching interface
         for entry in interfaces:
             if entry["name"] == interface_name and entry["index"] == index:
-                return entry["tagging"]
+                tag = entry.get("tagging", "-")
+                if tag not in ("null", "untagged", "-"):
+                    return tag
+                return index
         return "-"
 
     def _get_mac_code(self, mac_type, active):
@@ -259,10 +267,25 @@ class EthernetSwitchingReport:
             irb_interface_name_index_list = self._get_irbs_from_netinstance_data(network_interface_data)
             interface_name_index_list = self._get_interface_name_index_from_netinstance_data (network_interface_data)
 
+            default_netinst_vlan = "-"
+            for intf_entry in interface_name_index_list:
+                tag = intf_entry.get("tagging")
+                if tag and tag not in ("null", "untagged", "-"):
+                    default_netinst_vlan = tag
+                    break
+            if default_netinst_vlan == "-":
+                for irb_entry in irb_interface_name_index_list:
+                    idx = irb_entry.get("index")
+                    if idx:
+                        default_netinst_vlan = str(idx)
+                        break
+
             for mac_entry in mac_data.get_descendants('/network-instance/bridge-table/mac-table/mac'):
                 logical_subinterface = self._get_logical_interface(mac_entry.address, mac_entry.destination, irb_interface_name_index_list)
                 logical_interface = logical_subinterface.split('.')[0] if logical_subinterface else None
                 vlan = self._find_vlan(interface_name_index_list,logical_subinterface)
+                if vlan == "-":
+                    vlan = default_netinst_vlan
                 # if an interface (without the "".subint") is given as argument we populate the mac table for all its subinterfaces
                 if subinterface_name is not None and subinterface_name != logical_subinterface:
                     if not interface_as_argument or subinterface_name != logical_interface:

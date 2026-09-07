@@ -207,6 +207,12 @@ class MacAddressTableReport:
         return interface_name_index_list
 
     def _find_vlan(self, interfaces, query):
+        if not query:
+            return "-"
+        m_irb = re.search(r'irb\d*\.(\d+)', query)
+        if m_irb:
+            return m_irb.group(1)
+
         # Extract interface name and index using regex
         match = re.match(r'(.+)\.(\d+)', query)
         if not match:
@@ -218,20 +224,23 @@ class MacAddressTableReport:
         # Search for the matching interface
         for entry in interfaces:
             if entry["name"] == interface_name and entry["index"] == index:
-                return entry["tagging"]
+                tag = entry.get("tagging", "-")
+                if tag not in ("null", "untagged", "-"):
+                    return tag
+                return index
         return "-"
 
     def _get_mac_code(self, mac_type):
         if mac_type=="learnt":
             return "*"
-        if mac_type=="evpn":
-            return "C"
-        if "irb-interface" in mac_type:
+        if "evpn" in mac_type:
+            return "*"
+        if "irb" in mac_type:
             return "G"
         return "*"
 
     def _get_type(self, mac_type):
-        static_dynamic =  "dynamic" if mac_type=="evpn" or mac_type=="learnt" else "static"
+        static_dynamic =  "dynamic" if ("evpn" in mac_type or mac_type=="learnt") else "static"
         return static_dynamic
 
     def _get_logical_interface(self, mac_entry_destination):
@@ -273,6 +282,9 @@ class MacAddressTableReport:
             for irb in irb_interface_name_index_list:
                 if irb["hw_mac"] == mac_entry_address or irb["anycast_gw_mac"] == mac_entry_address:
                     return f'{irb["name"]}.{irb["index"]}(R)'
+            if irb_interface_name_index_list:
+                first_irb = irb_interface_name_index_list[0]
+                return f'{first_irb["name"]}.{first_irb["index"]}(R)'
             return f'irb(R)'
 
         return ""
@@ -309,11 +321,26 @@ class MacAddressTableReport:
             vxlan_interface_name_vni_list = self._get_vni_from_netinst_data ( network_vxlan_interface_data)
             interface_name_index_list = self._get_interface_name_index_from_netinstance_data ( network_interface_data)
 
+            default_netinst_vlan = "-"
+            for intf_entry in interface_name_index_list:
+                tag = intf_entry.get("tagging")
+                if tag and tag not in ("null", "untagged", "-"):
+                    default_netinst_vlan = tag
+                    break
+            if default_netinst_vlan == "-":
+                for irb_entry in irb_interface_name_index_list:
+                    idx = irb_entry.get("index")
+                    if idx:
+                        default_netinst_vlan = str(idx)
+                        break
+
             for mac_entry in mac_data.get_descendants('/network-instance/bridge-table/mac-table/mac'):
                 logical_subinterface = self._get_logical_interface(mac_entry.destination)
                 port_info = self._get_port_info(mac_entry.address, mac_entry.destination, mac_entry.destination_type, irb_interface_name_index_list)
                 logical_interface = logical_subinterface.split('.')[0] if logical_subinterface else None
                 vlan = self._find_vlan(interface_name_index_list, logical_subinterface)
+                if vlan == "-":
+                    vlan = default_netinst_vlan
                 vni = self._get_vni(mac_entry.destination, vxlan_interface_name_vni_list)
 
                 # if an interface (without the "".subint") is given as argument we populate the mac table for all its subinterfaces

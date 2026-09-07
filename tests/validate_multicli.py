@@ -54,18 +54,24 @@ TEST_SUITES = {
         ],
         "negative_assertions": [
             ("show mlag", "state: Active", "show mlag should not output hardcoded 'state: Active' when no MLAG is configured"),
+            ("show mlag", "local-interface     : Po1", "show mlag should not output synthetic 'Po1' when no interface is bound"),
             ("show port-channel summary", "LACP(a)", "show port-channel summary should not hardcode LACP(a) when no LAG is configured"),
             ("show environment cooling", "System Temperature", "show environment cooling should not trigger intermediate show environment all"),
             ("show environment power", "System Temperature", "show environment power should not trigger intermediate show environment all"),
             ("show lldp neighbors detail", "Last table change time", "show lldp neighbors detail should not trigger intermediate show lldp neighbors summary"),
             ("show lldp neighbors", "0:01:00 ago", "show lldp neighbors should not output hardcoded fake timestamp '0:01:00 ago'"),
             ("show ip route", "S       10.1.10.0/24", "Local/connected subnet should be classified as C or L, not S"),
+            ("show vlan", "--    app", "show vlan should dynamically derive VLAN tag rather than '--'"),
+            ("show mac address-table", "Vlan--", "show mac address-table should not output 'Vlan--'"),
         ],
         "positive_assertions": [
             ("show ip route", "Gateway of last resort", "show ip route must contain Gateway of last resort header"),
             ("show ip arp", "Age (min)", "show ip arp must contain Age (min) column"),
             ("show interfaces status", "Ethernet1/1", "show interfaces status must format interfaces in Arista style EthernetX/Y"),
             ("show ip bgp vrf default summary", "BGP summary information for VRF default", "show ip bgp vrf default summary must output VRF BGP summary"),
+            ("show vlan", "1     app", "show vlan must dynamically resolve VLAN 1 for app"),
+            ("show mac address-table", "1       0000.5e00.0101", "show mac address-table must dynamically resolve VLAN 1 for IRB MAC"),
+            ("show mac address-table", "Vlan1", "show mac address-table must format IRB port as Vlan1"),
         ]
     },
     "Cisco NX-OS": {
@@ -118,9 +124,11 @@ TEST_SUITES = {
         ],
         "negative_assertions": [
             ("show vpc", "peer-link is up", "show vpc should not output hardcoded 'peer-link is up' when no VPC/ES is configured"),
+            ("show vpc", "Po1", "show vpc should not output synthetic 'Po1' when no interface is bound"),
             ("show nve peers", "state: Up", "show nve peers should not output hardcoded 'state: Up' when no NVE peer is present"),
             ("show ip route", "ethernet-1/1.0", "show ip route should format interface as Eth1/1 rather than ethernet-1/1.0"),
-            ("show mac address-table vlan 1", "irb0.1", "show mac address-table vlan 1 should not leak non-matching VLAN entries from duplicate callback"),
+            ("show mac address-table vlan 1", "irb0.2", "show mac address-table vlan 1 should not leak non-matching VLAN 2 entries (irb0.2)"),
+            ("show mac address-table vlan 10", "irb0.1", "show mac address-table vlan 10 should not return non-matching entries"),
         ],
         "positive_assertions": [
             ("show processes cpu", "CPU utilization for five seconds:", "show processes cpu must contain CPU utilization summary"),
@@ -129,6 +137,8 @@ TEST_SUITES = {
             ("show ip route", "re:via \\d+\\.\\d+\\.\\d+\\.\\d+", "show ip route must dynamically resolve next-hop IP"),
             ("show ip route", "re:Eth\\d+/\\d+", "show ip route must dynamically resolve outgoing Cisco-formatted interface"),
             ("show ip bgp vrf default summary", "BGP summary information for VRF default", "show ip bgp vrf default summary must output VRF BGP summary"),
+            ("show mac address-table", "1   00:00:5E:00:01:01", "show mac address-table must show dynamic VLAN 1 for app MAC"),
+            ("show mac address-table vlan 1", "irb0.1(R)", "show mac address-table vlan 1 must return matching VLAN 1 entries"),
         ]
     },
     "Juniper JUNOS": {
@@ -162,11 +172,15 @@ TEST_SUITES = {
         ],
         "negative_assertions": [
             ("show system uptime", "Time Source: NTP CLOCK", "show system uptime should dynamically verify NTP state rather than hardcoding NTP CLOCK"),
+            ("show vlans", "app                   0", "show vlans should not output tag 0 for app when IRB tag is 1"),
+            ("show ethernet-switching table vlan 1", "irb0.2", "show ethernet-switching table vlan 1 should not leak VLAN 2 entries"),
         ],
         "positive_assertions": [
             ("show route", "re:inet\\.0: \\d+ destinations", "show route must contain destinations and routes header"),
             ("show route", "re:et-\\d+/\\d+/\\d+\\.\\d+", "show route must contain Juniper formatted interfaces"),
             ("show system processes", "re:THR\\s+PRI", "show system processes must include THR column"),
+            ("show vlans", "app                   1", "show vlans must dynamically derive tag 1 for app"),
+            ("show ethernet-switching table vlan 1", "irb0.1(R)", "show ethernet-switching table vlan 1 must return VLAN 1 entries"),
         ]
     }
 }

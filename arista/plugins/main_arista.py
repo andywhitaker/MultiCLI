@@ -60,66 +60,88 @@ class Plugin(CliPlugin):
             RequiredPlugin('version', module='srlinux'),
         ]
 
+    def _add_or_override(self, parent, syntax, callback=None, schema=None, update_location=False):
+        if hasattr(parent, 'get_command_or_none'):
+            node = parent.get_command_or_none(syntax.name)
+        elif hasattr(parent, 'root'):
+            node = parent.root.get_command_or_none(syntax.name)
+        else:
+            node = None
+        if node:
+            if callback:
+                node.set_callback(callback)
+            return node
+        return parent.add_command(syntax, callback=callback, schema=schema, update_location=update_location)
+
     def load(self, cli, **_kwargs):
         # 1. System Commands: version, hostname, clock, inventory, environment
-        ver_node = cli.show_mode.root.get_command_or_none('version')
-        if ver_node:
-            ver_node.set_callback(self._print_version)
-        else:
-            cli.show_mode.add_command(
-                Syntax('version', help='Show system version in Arista EOS format'),
-                callback=self._print_version
-            )
+        self._add_or_override(
+            cli.show_mode,
+            Syntax('version', help='Show system version in Arista EOS format'),
+            callback=self._print_version
+        )
 
-        cli.show_mode.add_command(
+        self._add_or_override(
+            cli.show_mode,
             Syntax('hostname', help='Show system hostname'),
             callback=self._print_hostname
         )
 
-        cli.show_mode.add_command(
+        self._add_or_override(
+            cli.show_mode,
             Syntax('clock', help='Show system clock in Arista EOS format'),
             callback=self._print_clock
         )
 
-        cli.show_mode.add_command(
+        self._add_or_override(
+            cli.show_mode,
             Syntax('inventory', help='Show system hardware inventory'),
             callback=self._print_inventory
         )
 
-        env_cmd = cli.show_mode.add_command(
+        env_cmd = self._add_or_override(
+            cli.show_mode,
             Syntax('environment', help='Show environment status'),
             callback=self._print_environment_all
         )
-        env_cmd.add_command(
+        self._add_or_override(
+            env_cmd,
             Syntax('cooling', help='Show cooling status'),
             callback=self._print_environment_cooling
         )
-        env_cmd.add_command(
+        self._add_or_override(
+            env_cmd,
             Syntax('power', help='Show power supply status'),
             callback=self._print_environment_power
         )
-        env_cmd.add_command(
+        self._add_or_override(
+            env_cmd,
             Syntax('temperature', help='Show temperature status'),
             callback=self._print_environment_temp
         )
 
-        cli.show_mode.add_command(
+        self._add_or_override(
+            cli.show_mode,
             Syntax('module', help='Show module information in Arista EOS format'),
             callback=self._print_module
         )
 
-        proc_cmd = cli.show_mode.add_command(
+        proc_cmd = self._add_or_override(
+            cli.show_mode,
             Syntax('processes', help='Show process information in Arista EOS format')
         )
-        proc_top = proc_cmd.add_command(
+        proc_top = self._add_or_override(
+            proc_cmd,
             Syntax('top', help='Show top processes')
         )
-        proc_top.add_command(
+        self._add_or_override(
+            proc_top,
             Syntax('once', help='Show top processes once'),
             callback=self._print_processes_top_once
         )
 
-        cli.show_mode.add_command(
+        self._add_or_override(
+            cli.show_mode,
             Syntax('mlag', help='Show MLAG information in Arista EOS format'),
             callback=self._print_mlag
         )
@@ -307,11 +329,13 @@ class Plugin(CliPlugin):
         )
 
         # 7. VRF & VLAN Commands
-        cli.show_mode.add_command(
+        self._add_or_override(
+            cli.show_mode,
             Syntax('vrf', help='VRF information in Arista format'),
             callback=self._print_vrf
         )
-        cli.show_mode.add_command(
+        self._add_or_override(
+            cli.show_mode,
             Syntax('vlan', help='VLAN information in Arista format'),
             callback=self._print_vlan
         )

@@ -285,6 +285,42 @@ class AristaRoutingReports:
         output.print_line("\n----------------------------------------------------------------------------------------------------")
         output.print_line("Try SR Linux command: show network-instance summary")
 
+    def _get_vlan_for_ni(self, state, raw_intfs):
+        """Extract VLAN ID for a mac-vrf network instance:
+        1. Check member subinterfaces' single-tagged VLAN encapsulation.
+        2. Fall back to IRB subinterface index (e.g. irb0.1 -> 1).
+        3. Fall back to subinterface index if > 0.
+        4. Fall back to '--'.
+        """
+        # 1. Single-tagged encapsulation from member subinterfaces
+        for intf_name in raw_intfs:
+            if '.' in intf_name and not intf_name.startswith('irb'):
+                p_name, sub_idx = intf_name.split('.', 1)
+                try:
+                    p = build_path(f'/interface[name={p_name}]/subinterface[index={sub_idx}]/vlan/encap/single-tagged/vlan-id')
+                    d = state.server_data_store.get_data(p, recursive=False)
+                    vlan_val = getattr(d.interface.get().subinterface.get().vlan.get().encap.get().single_tagged.get(), 'vlan_id', None)
+                    if vlan_val is not None:
+                        return str(vlan_val)
+                except Exception:
+                    pass
+
+        # 2. Fall back to IRB subinterface index
+        for intf_name in raw_intfs:
+            if 'irb' in intf_name:
+                m = re.search(r'irb\d*\.(\d+)', intf_name)
+                if m:
+                    return m.group(1)
+
+        # 3. Fall back to subinterface index if > 0
+        for intf_name in raw_intfs:
+            if '.' in intf_name:
+                sub_idx = intf_name.split('.', 1)[1]
+                if sub_idx != '0':
+                    return sub_idx
+
+        return "--"
+
     def show_vlan(self, state, output):
         """Display Arista EOS style 'show vlan'."""
         lines = [
@@ -292,11 +328,13 @@ class AristaRoutingReports:
             f"----- -------------------------------- --------- -------------------------------"
         ]
         intfs_by_ni = {}
+        raw_intfs_by_ni = {}
         try:
             intf_p = build_path('/network-instance[name=*]/interface[name=*]')
             intf_data = state.server_data_store.get_data(intf_p, recursive=False)
             for ni in intf_data.network_instance.items():
                 if hasattr(ni, 'interface'):
+                    raw_intfs_by_ni[ni.name] = [intf.name for intf in ni.interface.items()]
                     intfs_by_ni[ni.name] = [format_arista_intf(intf.name, short=True) for intf in ni.interface.items()]
         except Exception:
             pass
@@ -313,12 +351,8 @@ class AristaRoutingReports:
                 status = "active" if oper == "up" else "suspended"
 
                 ports = intfs_by_ni.get(name, [])
-
-                vlan_tag = "--"
-                for p in ports:
-                    if '.' in p:
-                        vlan_tag = p.split('.')[-1]
-                        break
+                raw_ports = raw_intfs_by_ni.get(name, [])
+                vlan_tag = self._get_vlan_for_ni(state, raw_ports)
 
                 ports_str = ", ".join(ports) if ports else "-"
                 lines.append(f"{str(vlan_tag):<5} {name:<32} {status:<9} {ports_str}")
@@ -337,33 +371,46 @@ class AristaRoutingReports:
             f"{'Vlan':<7} {'Mac Address':<17} {'Type':<11} {'Ports':<10} {'Moves':<7} {'Last Move'}",
             f"{'----':<7} {'-----------':<17} {'----':<11} {'-----':<10} {'-----':<7} {'---------'}"
         ]
+        vlan_by_ni = {}
+        try:
+            intf_p = build_path('/network-instance[name=*]/interface[name=*]')
+            intf_data = state.server_data_store.get_data(intf_p, recursive=False)
+            for ni in intf_data.network_instance.items():
+                if hasattr(ni, 'interface'):
+                    raw_ports = [intf.name for intf in ni.interface.items()]
+                    vlan_by_ni[ni.name] = self._get_vlan_for_ni(state, raw_ports)
+        except Exception:
+            pass
+
         path = build_path('/network-instance[name=*]/bridge-table/mac-table/mac[address=*]')
         try:
             data = state.server_data_store.get_data(path, recursive=True)
-            for entry in data.get_descendants('/network-instance/bridge-table/mac-table/mac'):
-                mac_addr = format_mac_cisco_arista(getattr(entry, 'address', ''))
-                mac_type = "DYNAMIC" if getattr(entry, 'type', 'learnt') in ('learnt', 'evpn') else "STATIC"
-                dest = getattr(entry, 'destination', '')
-                vlan_str = "--"
-                if 'vxlan' in dest.lower():
-                    m_vni = re.search(r'vni:(\d+)', dest)
-                    if m_vni:
-                        port = 'Vx' + m_vni.group(1)
-                        vlan_str = m_vni.group(1)
+            for ni in getattr(data, 'network_instance', []).items() if hasattr(data, 'network_instance') else []:
+                ni_name = ni.name
+                ni_vlan = vlan_by_ni.get(ni_name, "--")
+                bridge_table = getattr(ni, 'bridge_table', None)
+                if not bridge_table:
+                    continue
+                mac_table = getattr(bridge_table.get(), 'mac_table', None)
+                if not mac_table:
+                    continue
+                for entry in mac_table.get().mac.items():
+                    mac_addr = format_mac_cisco_arista(getattr(entry, 'address', ''))
+                    raw_type = getattr(entry, 'type', 'learnt')
+                    mac_type = "STATIC" if ('irb' in raw_type or raw_type == 'static') else "DYNAMIC"
+                    dest = getattr(entry, 'destination', '')
+                    vlan_str = ni_vlan
+                    if 'vxlan' in dest.lower():
+                        m_vni = re.search(r'vni:(\d+)', dest)
+                        if m_vni:
+                            port = 'Vx' + m_vni.group(1)
+                        else:
+                            port = 'VxLAN'
+                    elif 'irb' in dest.lower():
+                        port = f"Vlan{ni_vlan}" if ni_vlan != "--" else "Vlan"
                     else:
-                        port = 'VxLAN'
-                elif 'irb' in dest.lower():
-                    m = re.search(r'irb\d*\.(\d+)', dest)
-                    if m:
-                        vlan_str = m.group(1)
-                        port = f"Vlan{vlan_str}"
-                    else:
-                        port = "Vlan--"
-                else:
-                    port = format_arista_intf(dest.split()[0] if dest else "-", short=True)
-                    if '.' in port:
-                        vlan_str = port.split('.')[-1]
-                lines.append(f"{vlan_str:<7} {mac_addr:<17} {mac_type:<11} {port:<10} {'--':<7} {'-'}")
+                        port = format_arista_intf(dest.split()[0] if dest else "-", short=True)
+                    lines.append(f"{vlan_str:<7} {mac_addr:<17} {mac_type:<11} {port:<10} {'--':<7} {'-'}")
         except Exception:
             pass
 
@@ -537,19 +584,20 @@ class AristaRoutingReports:
                         for es in bi.ethernet_segment.items():
                             found = True
                             esi = getattr(es, 'esi', '--')
-                            intf = getattr(es, 'interface', '') or 'Po1'
+                            intf = getattr(es, 'interface', '') or '--'
                             domain_id = getattr(bi, 'id', 1)
                             admin_st = getattr(es, 'admin_state', 'enable')
                             oper_st = getattr(es, 'oper_state', 'down')
                             mlag_state = "Active" if (admin_st == "enable" and oper_st == "up") else "Inactive"
 
+                            intf_fmt = format_arista_intf(intf, short=True) if intf != '--' else '--'
                             peer_addr = "--"
                             lines = [
                                 "MLAG Configuration:",
                                 f"domain-id           : {domain_id}",
-                                f"local-interface     : {format_arista_intf(intf, short=True)}",
+                                f"local-interface     : {intf_fmt}",
                                 f"peer-address        : {peer_addr}",
-                                f"peer-link           : {format_arista_intf(intf, short=True)}",
+                                f"peer-link           : {intf_fmt}",
                                 f"state               : {mlag_state}"
                             ]
                             break
