@@ -1,5 +1,5 @@
 Package: srl-multicli
-Version: 0.1.0
+Version: 1.0.0
 Section: 
 Priority: optional
 Architecture: amd64

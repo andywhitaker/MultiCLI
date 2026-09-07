@@ -97,7 +97,13 @@ def should_register_show_mode(persona_name):
                 return False
         except Exception:
             pass
-    return True
+    # If no default_persona file is set, check if multiple vendor plugins are present
+    plugins_dir = '/etc/opt/srlinux/cli/plugins'
+    if os.path.exists(plugins_dir):
+        installed_plugins = [f for f in os.listdir(plugins_dir) if f.startswith('main_') and f.endswith('.py')]
+        if len(installed_plugins) == 1 and f'main_{persona_name.split("-")[0]}.py' in installed_plugins[0]:
+            return True
+    return False
 
 class Plugin(CliPlugin):
 

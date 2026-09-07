@@ -10,7 +10,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_ARCH="${1:-all}"
-VERSION="0.1.0"
+VERSION="${VERSION:-1.0.0}"
 
 if ! command -v dpkg-deb >/dev/null 2>&1; then
     echo "Error: dpkg-deb is required to build Debian packages."
