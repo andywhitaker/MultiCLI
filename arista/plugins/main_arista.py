@@ -728,14 +728,32 @@ class Plugin(CliPlugin):
         if state.is_intermediate_command:
             return
         InterfaceDetails().print(state, arguments, output, **_kwargs)
-        msg = 'Try SR Linux command: show interface {interface_name} detail'
+        name = None
+        if hasattr(arguments, 'has_node'):
+            if arguments.has_node('interface'):
+                name = arguments.get('interface', 'name')
+            elif arguments.has_node('interfaces'):
+                name = arguments.get('interfaces', 'name')
+        if name and name != '*':
+            msg = f'Try SR Linux command: show interface {name} detail'
+        else:
+            msg = 'Try SR Linux command: show interface detail'
         output.print_line(f'\n{"-" * len(msg)}\n{msg}')
 
     def _interface_status(self, state, arguments, output, **_kwargs):
         if state.is_intermediate_command:
             return
         InterfaceStatus().print(state, arguments, output)
-        msg = 'Try SR Linux command: show interface {interface_name} brief'
+        name = None
+        if hasattr(arguments, 'has_node'):
+            if arguments.has_node('interface'):
+                name = arguments.get('interface', 'name')
+            elif arguments.has_node('interfaces'):
+                name = arguments.get('interfaces', 'name')
+        if name and name != '*':
+            msg = f'Try SR Linux command: show interface {name} brief'
+        else:
+            msg = 'Try SR Linux command: show interface brief'
         output.print_line(f'\n{"-" * len(msg)}\n{msg}')
 
     def _arp_entries(self, state, arguments, output, **_kwargs):

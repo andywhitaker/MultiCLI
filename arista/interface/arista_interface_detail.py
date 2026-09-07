@@ -140,25 +140,30 @@ class InterfaceDetails(object):
                 connection_status = "notconnected"
             connection_status = connection_status
             # hardware = intf.hardware
-            raw_mac_address = intf.ethernet.get().hw_mac_address
+            raw_mac_address = ""
+            if hasattr(intf, 'ethernet') and intf.ethernet.exists():
+                raw_mac_address = getattr(intf.ethernet.get(), 'hw_mac_address', '') or ''
             mac_address = self.convert_mac(raw_mac_address)
             bia_address = mac_address
-            mtu = intf.mtu
+            mtu = getattr(intf, 'mtu', 1500)
             #bandwidth calculation with exception handling
+            port_speed = "100G"
             try:
-                port_speed = intf.ethernet.get().port_speed
+                if hasattr(intf, 'ethernet') and intf.ethernet.exists():
+                    port_speed = getattr(intf.ethernet.get(), 'port_speed', '100G') or '100G'
                 if not port_speed or not isinstance(port_speed, str):
                     raise ValueError("Invalid or missing port speed")
 
-                bandwidth = int(port_speed.rstrip("G")) * 1_000_000
+                bandwidth = int(port_speed.rstrip("GMK")) * 1_000_000
 
             except Exception:
                 bandwidth = None
+            duplex = "Full"
             try:
-                duplex = intf.ethernet.get().duplex_mode
-            except:
+                if hasattr(intf, 'ethernet') and intf.ethernet.exists():
+                    duplex = getattr(intf.ethernet.get(), 'duplex_mode', 'Full') or 'Full'
+            except Exception:
                 duplex = "Full"
-            port_speed = intf.ethernet.get().port_speed
             auto_negotiation = "on"
             uni_link = "disabled"
             #calculating the uptime
@@ -166,16 +171,50 @@ class InterfaceDetails(object):
                 uptime = self._build_last_change_string(intf.last_change)
             else:
                 uptime = "00"
-            loopback_mode = intf.loopback_mode
-            link_changes = intf.statistics.get().carrier_transitions
-            input_packets = intf.statistics.get().in_packets
-            input_bytes = intf.statistics.get().in_octets
-            received_broadcasts = intf.statistics.get().in_broadcast_packets
-            received_multicast = intf.statistics.get().in_multicast_packets
-            # runts = intf.statistics.get().in_runts
-            giants = intf.ethernet.get().statistics.get().in_oversize_frames
-            input_errors = intf.statistics.get().in_error_packets
-            crc_errors = intf.ethernet.get().statistics.get().in_crc_error_frames
+            loopback_mode = getattr(intf, 'loopback_mode', 'None')
+            link_changes = 0
+            input_packets = 0
+            input_bytes = 0
+            received_broadcasts = 0
+            received_multicast = 0
+            input_errors = 0
+            input_discards = 0
+            output_packets = 0
+            output_bytes = 0
+            sent_broadcasts = 0
+            sent_multicast = 0
+            output_errors = 0
+            output_discards = 0
+            if hasattr(intf, 'statistics') and intf.statistics.exists():
+                stats = intf.statistics.get()
+                link_changes = getattr(stats, 'carrier_transitions', 0) or 0
+                input_packets = getattr(stats, 'in_packets', 0) or 0
+                input_bytes = getattr(stats, 'in_octets', 0) or 0
+                received_broadcasts = getattr(stats, 'in_broadcast_packets', 0) or 0
+                received_multicast = getattr(stats, 'in_multicast_packets', 0) or 0
+                input_errors = getattr(stats, 'in_error_packets', 0) or 0
+                input_discards = getattr(stats, 'in_discarded_packets', 0) or 0
+                output_packets = getattr(stats, 'out_packets', 0) or 0
+                output_bytes = getattr(stats, 'out_octets', 0) or 0
+                sent_broadcasts = getattr(stats, 'out_broadcast_packets', 0) or 0
+                sent_multicast = getattr(stats, 'out_multicast_packets', 0) or 0
+                output_errors = getattr(stats, 'out_error_packets', 0) or 0
+                output_discards = getattr(stats, 'out_discarded_packets', 0) or 0
+
+            runts = 0
+            giants = 0
+            crc_errors = 0
+            pause_input = 0
+            pause_output = 0
+            if hasattr(intf, 'ethernet') and intf.ethernet.exists():
+                eth_obj = intf.ethernet.get()
+                if hasattr(eth_obj, 'statistics') and eth_obj.statistics.exists():
+                    eth_stats = eth_obj.statistics.get()
+                    runts = getattr(eth_stats, 'in_undersize_frames', 0) or 0
+                    giants = getattr(eth_stats, 'in_oversize_frames', 0) or 0
+                    crc_errors = getattr(eth_stats, 'in_crc_error_frames', 0) or 0
+                    pause_input = getattr(eth_stats, 'in_mac_pause_frames', 0) or 0
+                    pause_output = getattr(eth_stats, 'out_mac_pause_frames', 0) or 0
             #alignment_errors = intf.statistics.get().in_alignment_error_frames
             #symbol_errors = intf.statistics.get().in_symbol_error_frames
             input_discards = intf.statistics.get().in_discarded_packets
@@ -245,7 +284,7 @@ class InterfaceDetails(object):
             "input_bytes": input_bytes,
             "received_broadcasts": received_broadcasts,
             "received_multicast": received_multicast,
-            "runts": 0,
+            "runts": runts,
             "giants": giants,
             "input_errors": input_errors,
             "crc_errors": crc_errors,

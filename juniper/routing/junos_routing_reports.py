@@ -657,7 +657,7 @@ class JunosRoutingReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show network-instance <instance> protocols ospf neighbor")
+        output.print_line("Try SR Linux command: show network-instance default protocols ospf neighbor")
 
     def show_isis_adjacency(self, state, output):
         """Display Juniper JUNOS style 'show isis adjacency'."""
@@ -690,4 +690,4 @@ class JunosRoutingReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show network-instance <instance> protocols isis adjacency")
+        output.print_line("Try SR Linux command: show network-instance default protocols isis adjacency")

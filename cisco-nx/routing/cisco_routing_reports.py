@@ -294,7 +294,7 @@ class CiscoRoutingReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show network-instance <instance> protocols ospf neighbor")
+        output.print_line("Try SR Linux command: show network-instance default protocols ospf neighbor")
 
     def show_ip_ospf_interface_brief(self, state, output):
         """Display Cisco NX-OS style 'show ip ospf interface brief'."""

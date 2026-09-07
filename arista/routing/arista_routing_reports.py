@@ -417,7 +417,7 @@ class AristaRoutingReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show network-instance <instance> bridge-table mac-table all")
+        output.print_line("Try SR Linux command: show network-instance bridge-table mac-table all")
 
     def show_ip_ospf_neighbor(self, state, output):
         """Display Arista EOS style 'show ip ospf neighbor'."""

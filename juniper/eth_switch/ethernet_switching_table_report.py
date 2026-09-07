@@ -377,7 +377,7 @@ class StatisticsFormatter(Formatter):
 srlinux_suggested_command = """ 
 ------------------------------------------------------------------------------------------------
 Try SR Linux command:
-->   show network-instance <instance> bridge-table mac-table all
-->   show interface ethernet-x/y.z | grep Encapsulation
+->   show network-instance bridge-table mac-table all
+->   show interface brief
 """
 

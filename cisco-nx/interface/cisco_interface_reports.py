@@ -646,6 +646,7 @@ class CiscoInterfaceReports:
             speed_val = "100 Gb/s"
             crc_errors = 0
             giants = 0
+            runts = 0
 
             if hasattr(intf, 'ethernet') and intf.ethernet.exists():
                 eth = intf.ethernet.get()
@@ -682,6 +683,7 @@ class CiscoInterfaceReports:
                         eth_stats = eth.statistics.get()
                         crc_errors = getattr(eth_stats, 'in_crc_error_frames', 0) or 0
                         giants = getattr(eth_stats, 'in_oversize_frames', 0) or 0
+                        runts = getattr(eth_stats, 'in_undersize_frames', 0) or 0
                 except Exception:
                     pass
 
@@ -692,9 +694,6 @@ class CiscoInterfaceReports:
                 tr = intf.traffic_rate.get()
                 in_bps = getattr(tr, 'in_bps', 0) or 0
                 out_bps = getattr(tr, 'out_bps', 0) or 0
-
-            in_pps = round(in_bps / 800) if in_bps else 0
-            out_pps = round(out_bps / 800) if out_bps else 0
 
             in_pkts = 0
             in_octets = 0
@@ -721,6 +720,9 @@ class CiscoInterfaceReports:
                 out_bcast = getattr(stats, 'out_broadcast_packets', 0) or 0
                 out_errors = getattr(stats, 'out_error_packets', 0) or 0
                 carrier_transitions = getattr(stats, 'carrier_transitions', 0) or 0
+                intf_resets = getattr(stats, 'interface_transitions', None)
+                if intf_resets is None:
+                    intf_resets = carrier_transitions
 
             # Mode & IPv4 addresses
             mode_str = "routed"
@@ -761,16 +763,16 @@ class CiscoInterfaceReports:
                 f"  EtherType is 0x8100",
                 f"  {carrier_transitions} link status changes since last clear",
                 f"  Last clearing of \"show interface\" counters never",
-                f"  1 interface resets",
-                f"  30 seconds input rate {in_bps} bits/sec, {in_pps} packets/sec",
-                f"  30 seconds output rate {out_bps} bits/sec, {out_pps} packets/sec",
+                f"  {intf_resets} interface resets",
+                f"  30 seconds input rate {in_bps} bits/sec",
+                f"  30 seconds output rate {out_bps} bits/sec",
                 f"  Load-Interval #2: 5 minute (300 seconds)",
-                f"    input rate {in_bps} bps, {in_pps} pps; output rate {out_bps} bps, {out_pps} pps",
+                f"    input rate {in_bps} bps; output rate {out_bps} bps",
                 f"  RX",
                 f"    {in_pkts} packets {in_octets} bytes",
                 f"    {in_multi} multicast packets {in_bcast} broadcast packets",
                 f"    {in_errors} input errors {crc_errors} CRC 0 frame 0 overrun 0 ignored",
-                f"    0 abort 0 runts {giants} giants 0 invalid length",
+                f"    0 abort {runts} runts {giants} giants 0 invalid length",
                 f"  TX",
                 f"    {out_pkts} packets {out_octets} bytes",
                 f"    {out_multi} multicast packets {out_bcast} broadcast packets",

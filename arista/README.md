@@ -67,15 +67,20 @@ The scripts are arranged in this format. The main_arista.py checks the imports i
 ├── interface
 │   ├── arista_arp_details.py         # Parses and formats ARP entries
 │   ├── arista_interface_detail.py    # Displays detailed interface info (Arista style)
-│   ├── arista_interface_status.py    # Displays brief interface status (Arista style)
-│   
+│   ├── arista_interface_reports.py   # Interface brief, transceiver, description, LLDP, LAG
+│   └── arista_interface_status.py    # Displays brief interface status (Arista style)
 │
 ├── ip
-│   └── ip_bgp_report.py              # Generates standard BGP summary reports
+│   └── arista_ip_bgp_report.py       # Generates standard BGP summary reports
 │
-└── plugins
-    ├── main_arista.py                # Loads Arista-style CLI plugins
-
+├── plugins
+│   └── main_arista.py                # Loads Arista-style CLI plugins
+│
+├── routing
+│   └── arista_routing_reports.py     # IP route, VRF, VLAN, MAC, OSPF, IS-IS, MLAG
+│
+└── system
+    └── arista_system_reports.py      # Version, hostname, clock, inventory, environment
 ```
 
 ### Verification commands:
