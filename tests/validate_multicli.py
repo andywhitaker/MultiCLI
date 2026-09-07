@@ -109,10 +109,13 @@ TEST_SUITES = {
             ("show vpc", "peer-link is up", "show vpc should not output hardcoded 'peer-link is up' when no VPC/ES is configured"),
             ("show nve peers", "state: Up", "show nve peers should not output hardcoded 'state: Up' when no NVE peer is present"),
             ("show ip route", "ethernet-1/1.0", "show ip route should format interface as Eth1/1 rather than ethernet-1/1.0"),
+            ("show mac address-table vlan 1", "irb0.1", "show mac address-table vlan 1 should not leak non-matching VLAN entries from duplicate callback"),
         ],
         "positive_assertions": [
             ("show processes cpu", "CPU utilization for five seconds:", "show processes cpu must contain CPU utilization summary"),
             ("show ip arp", "MAC Address", "show ip arp must contain MAC Address header"),
+            ("show ip route", "via 10.2.10.10", "show ip route must dynamically resolve next-hop IP"),
+            ("show ip route", "Eth1/1", "show ip route must dynamically resolve outgoing Cisco-formatted interface"),
         ]
     },
     "Juniper JUNOS": {

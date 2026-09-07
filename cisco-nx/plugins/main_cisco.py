@@ -282,6 +282,8 @@ class Plugin(CliPlugin):
         CiscoRoutingReports().show_ip_ospf_neighbor(state, output)
 
     def _print_mac_address_table(self, state, arguments, output, **kwargs):
+        if state.is_intermediate_command:
+            return
         MacAddressTableReport()._show_table_instance(state, output, arguments, **kwargs)
 
     def _print_vrf(self, state, output, **_kwargs):

@@ -123,7 +123,7 @@ class AristaSystemReports:
     def show_hostname(self, state, output):
         """Display Arista EOS style 'show hostname'."""
         hostname = "unknown"
-        p_host = build_path('/system/name/host-name:')
+        p_host = build_path('/system/name/host-name')
         try:
             d_host = state.server_data_store.get_data(p_host, recursive=True)
             hostname = d_host.system.get().name.get().host_name or "unknown"
@@ -216,7 +216,7 @@ class AristaSystemReports:
             pass
 
         try:
-            fan_path = build_path('/platform/fan-tray[tray-id=*]')
+            fan_path = build_path('/platform/fan-tray[id=*]')
             fan_data = state.server_data_store.get_data(fan_path, recursive=True)
             fans = list(fan_data.platform.get().fan_tray.items())
             if fans:
@@ -224,7 +224,7 @@ class AristaSystemReports:
                 lines.append(f" Module Number of Fans Model            Serial Number")
                 lines.append(f" ------- --------------- ---------------- ----------------")
                 for fan in fans:
-                    tray_id = getattr(fan, 'tray_id', '-')
+                    tray_id = getattr(fan, 'id', getattr(fan, 'tray_id', '-'))
                     model = getattr(fan, 'type', 'FAN') or 'FAN'
                     sn = getattr(fan, 'serial_number', '-') or '-'
                     lines.append(f" {str(tray_id):<7} 1               {str(model):<16} {str(sn):<16}")
@@ -243,12 +243,12 @@ class AristaSystemReports:
             lines.append("System cooling status:")
             found_fan = False
             try:
-                fan_path = build_path('/platform/fan-tray[tray-id=*]')
+                fan_path = build_path('/platform/fan-tray[id=*]')
                 fan_data = state.server_data_store.get_data(fan_path, recursive=True)
                 lines.append("Slot  Description                       Status         Speed")
                 lines.append("----- --------------------------------- -------------- ------")
                 for fan in fan_data.platform.get().fan_tray.items():
-                    tray_id = getattr(fan, 'tray_id', '-')
+                    tray_id = getattr(fan, 'id', getattr(fan, 'tray_id', '-'))
                     oper = getattr(fan, 'oper_state', '-')
                     if oper != 'empty':
                         found_fan = True
@@ -510,7 +510,14 @@ class AristaSystemReports:
         for fields in ps_rows[:25]:
             pid, usr, pri, ni, vsz, rss, stat, cpu, mem, tm, comm = fields
             s_stat = stat[0]
-            lines.append(f"{pid:>5} {usr:<9} {pri:<4} {ni:<4} {vsz:>8} {rss:>7} {'0':>6} {s_stat:<2} {cpu:>5} {mem:>5} {tm:>8} {comm}")
+            shr_kb = "0"
+            try:
+                with open(f"/proc/{pid}/statm") as f_sm:
+                    shr_pages = int(f_sm.read().split()[2])
+                    shr_kb = str(shr_pages * 4)
+            except Exception:
+                shr_kb = "0"
+            lines.append(f"{pid:>5} {usr:<9} {pri:<4} {ni:<4} {vsz:>8} {rss:>7} {shr_kb:>6} {s_stat:<2} {cpu:>5} {mem:>5} {tm:>8} {comm}")
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")

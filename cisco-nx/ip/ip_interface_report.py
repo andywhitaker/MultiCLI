@@ -174,7 +174,6 @@ class IpInterfaceReport:
                         data_child = data.interface.create(intf_name)
                     except Exception as e:
                         # If interface already exists, skip
-                        print(f"Skipping duplicate interface: {intf_name}")
                         continue
                     
                     # Rest of the code remains the same

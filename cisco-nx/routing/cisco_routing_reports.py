@@ -168,9 +168,23 @@ class CiscoRoutingReports:
                         ld = getattr(p, 'local_discriminator', '--')
                         rd = getattr(p, 'remote_discriminator', '--')
                         state_val = getattr(p, 'oper_state', 'down').capitalize()
-                        intf = format_cisco_intf(getattr(p, 'interface', ''), short=True)
+                        intf_raw = getattr(p, 'ipv4_unnumbered_interface', None) or getattr(p, 'ipv6_link_local_interface', None) or getattr(p, 'interface', '')
+                        intf = format_cisco_intf(intf_raw, short=True)
                         rh_rs = "Up/Up" if state_val == "Up" else f"{state_val}/--"
-                        lines.append(f"{our_addr:<15} {neigh_addr:<15} {f'{ld}/{rd}':<7} {rh_rs:<7} {'--':<15} {state_val:<7} {intf:<8} {vrf:<8} {'--'}")
+                        mult = getattr(p, 'remote_multiplier', None)
+                        rx_int = getattr(p, 'active_receive_interval', None)
+                        if mult is not None and rx_int is not None:
+                            try:
+                                hold_ms = (int(rx_int) * int(mult)) // 1000
+                                holdown_str = f"{hold_ms}({mult})"
+                            except Exception:
+                                holdown_str = f"--({mult})"
+                        elif mult is not None:
+                            holdown_str = f"--({mult})"
+                        else:
+                            holdown_str = "--"
+                        proto_type = getattr(p, 'subscribed_protocols', '--') or '--'
+                        lines.append(f"{our_addr:<15} {neigh_addr:<15} {f'{ld}/{rd}':<7} {rh_rs:<7} {holdown_str:<15} {state_val:<7} {intf:<8} {vrf:<8} {proto_type}")
         except Exception:
             pass
 
@@ -186,26 +200,56 @@ class CiscoRoutingReports:
         lines = [
             f"{'Neighbor ID':<15} {'Pri':<4} {'State':<15} {'Up Time':<9} {'Address':<15} {'Interface'}"
         ]
-        path = build_path('/network-instance[name=*]/protocols/ospf/area[area-id=*]/interface[interface-name=*]/neighbor[router-id=*]')
+        path = build_path('/network-instance[name=*]/protocols/ospf/instance[name=*]/area[area-id=*]/interface[interface-name=*]/neighbor[router-id=*]')
+        found = False
         try:
             data = state.server_data_store.get_data(path, recursive=True)
             for ni in data.network_instance.items():
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
                     ospf = getattr(ni.protocols.get(), 'ospf', None)
-                    if ospf and hasattr(ospf.get(), 'area'):
-                        for area in ospf.get().area.items():
-                            if hasattr(area, 'interface'):
-                                for intf in area.interface.items():
-                                    intf_name = format_cisco_intf(intf.interface_name, short=True)
-                                    if hasattr(intf, 'neighbor'):
-                                        for n in intf.neighbor.items():
-                                            r_id = getattr(n, 'router_id', '--')
-                                            n_state = getattr(n, 'oper_state', '--').upper()
-                                            ip = getattr(n, 'ipv4_address', '--')
-                                            pri = getattr(n, 'priority', '--')
-                                            lines.append(f"{r_id:<15} {str(pri):<4} {n_state:<15} {'--':<9} {ip:<15} {intf_name}")
+                    if ospf and hasattr(ospf.get(), 'instance'):
+                        for inst in ospf.get().instance.items():
+                            if hasattr(inst, 'area'):
+                                for area in inst.area.items():
+                                    if hasattr(area, 'interface'):
+                                        for intf in area.interface.items():
+                                            intf_name = format_cisco_intf(intf.interface_name, short=True)
+                                            if hasattr(intf, 'neighbor'):
+                                                for n in intf.neighbor.items():
+                                                    found = True
+                                                    r_id = getattr(n, 'router_id', '--')
+                                                    adj_st = getattr(n, 'adjacency_state', None)
+                                                    n_state = str(adj_st).split(':')[-1].upper() if adj_st else '--'
+                                                    ip = getattr(n, 'address', '--')
+                                                    pri = getattr(n, 'priority', '--')
+                                                    uptime_str = "--"
+                                                    last_est = getattr(n, 'last_established_time', None)
+                                                    if last_est:
+                                                        try:
+                                                            s_est = str(last_est)
+                                                            if '(' in s_est:
+                                                                uptime_str = s_est.split('(')[-1].rstrip(')').replace(' ago', '')
+                                                            else:
+                                                                t_str = s_est.replace('Z', '+00:00')
+                                                                dt = datetime.datetime.fromisoformat(t_str)
+                                                                if dt.tzinfo is None:
+                                                                    dt = dt.replace(tzinfo=datetime.timezone.utc)
+                                                                delta = datetime.datetime.now(datetime.timezone.utc) - dt
+                                                                days = delta.days
+                                                                hours, remainder = divmod(delta.seconds, 3600)
+                                                                mins, secs = divmod(remainder, 60)
+                                                                if days > 0:
+                                                                    uptime_str = f"{days}d{hours:02d}h"
+                                                                else:
+                                                                    uptime_str = f"{hours:02d}:{mins:02d}:{secs:02d}"
+                                                        except Exception:
+                                                            uptime_str = "--"
+                                                    lines.append(f"{r_id:<15} {str(pri):<4} {n_state:<15} {uptime_str:<9} {str(ip):<15} {intf_name}")
         except Exception:
             pass
+
+        if not found:
+            lines.append("No OSPF neighbors configured or active.")
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
@@ -217,8 +261,26 @@ class CiscoRoutingReports:
             f"{'Interface':<15} {'VRF-Name':<12} {'State':<6} {'Area':<15} {'IP Address/Mask':<20} {'Cost'}",
             "--------------- ------------ ------ --------------- -------------------- -----"
         ]
+        intf_ip_map = {}
+        try:
+            intf_path = build_path('/interface[name=*]/subinterface[index=*]/ipv4/address')
+            intf_data = state.server_data_store.get_data(intf_path, recursive=False)
+            for intf in intf_data.interface.items():
+                if hasattr(intf, 'subinterface'):
+                    for sub in intf.subinterface.items():
+                        full_name = f"{intf.name}.{sub.index}"
+                        if hasattr(sub, 'ipv4') and sub.ipv4.exists():
+                            ipv4_node = sub.ipv4.get()
+                            if hasattr(ipv4_node, 'address'):
+                                for a in ipv4_node.address.items():
+                                    if hasattr(a, 'ip_prefix') and a.ip_prefix:
+                                        intf_ip_map[full_name] = str(a.ip_prefix)
+                                        break
+        except Exception:
+            pass
+
         found = False
-        path = build_path('/network-instance[name=*]/protocols/ospf')
+        path = build_path('/network-instance[name=*]/protocols/ospf/instance[name=*]/area[area-id=*]/interface[interface-name=*]')
         try:
             data = state.server_data_store.get_data(path, recursive=True)
             for ni in data.network_instance.items():
@@ -229,25 +291,20 @@ class CiscoRoutingReports:
                         continue
                     ospf_obj = ospf.get() if hasattr(ospf, 'get') else ospf
                     
-                    areas = []
                     if hasattr(ospf_obj, 'instance'):
                         for inst in ospf_obj.instance.items():
                             if hasattr(inst, 'area'):
-                                for a in inst.area.items():
-                                    areas.append(a)
-                    if hasattr(ospf_obj, 'area'):
-                        for a in ospf_obj.area.items():
-                            areas.append(a)
-
-                    for area in areas:
-                        area_id = str(getattr(area, 'area_id', '0.0.0.0'))
-                        if hasattr(area, 'interface'):
-                            for iface in area.interface.items():
-                                found = True
-                                intf_disp = format_cisco_intf(iface.interface_name, short=True)
-                                cost = str(getattr(iface, 'interface_cost', 10))
-                                st = str(getattr(iface, 'oper_state', 'down')).upper()
-                                lines.append(f"{intf_disp:<15} {vrf:<12} {st:<6} {area_id:<15} {'--':<20} {cost}")
+                                for area in inst.area.items():
+                                    area_id = str(getattr(area, 'area_id', '0.0.0.0'))
+                                    if hasattr(area, 'interface'):
+                                        for iface in area.interface.items():
+                                            found = True
+                                            raw_name = str(iface.interface_name)
+                                            intf_disp = format_cisco_intf(raw_name, short=True)
+                                            cost = str(getattr(iface, 'interface_cost', 10))
+                                            st = str(getattr(iface, 'oper_state', 'down')).upper()
+                                            ip_mask = intf_ip_map.get(raw_name, "--")
+                                            lines.append(f"{intf_disp:<15} {vrf:<12} {st:<6} {area_id:<15} {ip_mask:<20} {cost}")
         except Exception:
             pass
 

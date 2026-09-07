@@ -62,7 +62,6 @@ class InterfaceDetails(object):
             if not mac or not isinstance(mac, str):
                 raise ValueError("Invalid MAC address provided")
 
-            print(mac)
             mac = mac.replace(":", "").replace("-", "").lower()
 
             if len(mac) != 12:
@@ -115,7 +114,7 @@ class InterfaceDetails(object):
         return round(utilization, 2)
     
 
-    def _fetch_state(self, state, arguments):
+    def _fetch_state(self, state, arguments, output):
         interface_name = arguments.get('interface', 'name')
 
         path = build_path('/interface[name={name}]', name=interface_name) 
@@ -265,12 +264,11 @@ class InterfaceDetails(object):
             }
 
             template = Template(template_string)
-            output = template.render(data)
-            print(output, end='')
-            print()
+            rendered = template.render(data)
+            output.print_line(rendered)
 
         return my_data
    
     def print(self, state, arguments, output, **_kwargs):
-        self._fetch_state(state, arguments)
+        self._fetch_state(state, arguments, output)
         

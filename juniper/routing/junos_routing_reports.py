@@ -410,24 +410,28 @@ class JunosRoutingReports:
         lines = [
             f"{'Address':<16} {'Interface':<23} {'State':<9} {'ID':<16} {'Pri':<4} {'Dead'}"
         ]
-        path = build_path('/network-instance[name=*]/protocols/ospf/area[area-id=*]/interface[interface-name=*]/neighbor[router-id=*]')
+        path = build_path('/network-instance[name=*]/protocols/ospf/instance[name=*]/area[area-id=*]/interface[interface-name=*]/neighbor[router-id=*]')
         try:
             data = state.server_data_store.get_data(path, recursive=True)
             for ni in data.network_instance.items():
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
                     ospf = getattr(ni.protocols.get(), 'ospf', None)
-                    if ospf and hasattr(ospf.get(), 'area'):
-                        for area in ospf.get().area.items():
-                            if hasattr(area, 'interface'):
-                                for intf in area.interface.items():
-                                    intf_name = format_junos_intf(intf.interface_name, with_unit=True)
-                                    if hasattr(intf, 'neighbor'):
-                                        for n in intf.neighbor.items():
-                                            r_id = getattr(n, 'router_id', '--')
-                                            n_state = getattr(n, 'oper_state', '--').capitalize()
-                                            ip = getattr(n, 'ipv4_address', '--')
-                                            pri = getattr(n, 'priority', '--')
-                                            lines.append(f"{ip:<16} {intf_name:<23} {n_state:<9} {r_id:<16} {str(pri):<4} --")
+                    if ospf and hasattr(ospf.get(), 'instance'):
+                        for inst in ospf.get().instance.items():
+                            if hasattr(inst, 'area'):
+                                for area in inst.area.items():
+                                    if hasattr(area, 'interface'):
+                                        for intf in area.interface.items():
+                                            intf_name = format_junos_intf(intf.interface_name, with_unit=True)
+                                            if hasattr(intf, 'neighbor'):
+                                                for n in intf.neighbor.items():
+                                                    r_id = getattr(n, 'router_id', '--')
+                                                    adj_st = getattr(n, 'adjacency_state', None)
+                                                    n_state = str(adj_st).split(':')[-1].capitalize() if adj_st else '--'
+                                                    ip = getattr(n, 'address', '--')
+                                                    pri = getattr(n, 'priority', '--')
+                                                    dead = getattr(n, 'dead_time', '--')
+                                                    lines.append(f"{str(ip):<16} {intf_name:<23} {n_state:<9} {str(r_id):<16} {str(pri):<4} {str(dead)}")
         except Exception:
             pass
 
@@ -440,16 +444,27 @@ class JunosRoutingReports:
         lines = [
             f"{'Interface':<21} {'System':<14} {'L':<2} {'State':<13} {'Hold (secs)':<12} {'SNPA'}"
         ]
-        path = build_path('/network-instance[name=*]/protocols/isis/instance[name=*]/adjacency[interface=*]')
+        path = build_path('/network-instance[name=*]/protocols/isis/instance[name=*]/interface[interface-name=*]/adjacency[neighbor-system-id=*][adjacency-level=*]')
         try:
             data = state.server_data_store.get_data(path, recursive=True)
-            for adj in data.get_descendants('/network-instance/protocols/isis/instance/adjacency'):
-                intf = format_junos_intf(getattr(adj, 'interface', ''), with_unit=True)
-                sys_id = getattr(adj, 'system_id', '-') or '-'
-                level = getattr(adj, 'level', '2')
-                oper = getattr(adj, 'oper_state', '--').capitalize()
-                hold = getattr(adj, 'remaining_hold_time', '--') or '--'
-                lines.append(f"{intf:<21} {sys_id:<14} {str(level):<2} {oper:<13} {str(hold):<12}")
+            for ni in data.network_instance.items():
+                if hasattr(ni, 'protocols') and ni.protocols.exists():
+                    isis = getattr(ni.protocols.get(), 'isis', None)
+                    if isis and hasattr(isis.get(), 'instance'):
+                        for inst in isis.get().instance.items():
+                            if hasattr(inst, 'interface'):
+                                for iface in inst.interface.items():
+                                    intf = format_junos_intf(iface.interface_name, with_unit=True)
+                                    if hasattr(iface, 'adjacency'):
+                                        for adj in iface.adjacency.items():
+                                            sys_id = getattr(adj, 'neighbor_hostname', None) or getattr(adj, 'neighbor_system_id', '-')
+                                            level = str(getattr(adj, 'adjacency_level', '2'))
+                                            raw_st = getattr(adj, 'state', '--')
+                                            oper = str(raw_st).split(':')[-1].capitalize() if raw_st else '--'
+                                            hold = str(getattr(adj, 'remaining_holdtime', '--'))
+                                            snpa_raw = getattr(adj, 'neighbor_snpa', None)
+                                            snpa = format_mac_junos(snpa_raw) if snpa_raw else '--'
+                                            lines.append(f"{intf:<21} {str(sys_id):<14} {level:<2} {oper:<13} {hold:<12} {snpa}")
         except Exception:
             pass
 

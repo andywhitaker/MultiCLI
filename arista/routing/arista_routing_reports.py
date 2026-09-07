@@ -86,13 +86,37 @@ class AristaRoutingReports:
             # Build next-hop index to IP/interface mapping
             for nh in rt_data.get_descendants('/network-instance/route-table/next-hop'):
                 nh_idx = getattr(nh, 'index', None)
-                if nh_idx is not None:
-                    ip = getattr(nh, 'ip_address', None)
-                    subif = getattr(nh, 'subinterface', None)
-                    nh_map[str(nh_idx)] = {
-                        'ip': str(ip) if ip else None,
-                        'interface': str(subif) if subif else None
-                    }
+                if nh_idx is None:
+                    continue
+
+                nh_type = getattr(nh, 'type', None)
+                ip = getattr(nh, 'ip_address', None)
+                subif = getattr(nh, 'subinterface', None)
+                resolving_nhg = None
+
+                if nh_type == 'tunnel' and hasattr(nh, 'tunnel'):
+                    try:
+                        t = nh.tunnel.get()
+                        pfx = getattr(t, 'ip_prefix', None)
+                        if pfx and not ip:
+                            ip = str(pfx).split('/')[0]
+                    except Exception:
+                        pass
+
+                if nh_type == 'indirect' and hasattr(nh, 'indirect'):
+                    try:
+                        ind = nh.indirect.get()
+                        rr = getattr(ind, 'resolving_route', None)
+                        if rr:
+                            resolving_nhg = getattr(rr.get(), 'next_hop_group', None)
+                    except Exception:
+                        pass
+
+                nh_map[str(nh_idx)] = {
+                    'ip': str(ip) if ip else None,
+                    'interface': str(subif) if subif else None,
+                    'resolving_nhg': str(resolving_nhg) if resolving_nhg is not None else None,
+                }
 
             # Build next-hop group mapping
             for nhg in rt_data.get_descendants('/network-instance/route-table/next-hop-group'):
@@ -104,6 +128,15 @@ class AristaRoutingReports:
                         if target_nh is not None and str(target_nh) in nh_map:
                             hops.append(nh_map[str(target_nh)])
                     nhg_map[str(nhg_idx)] = hops
+
+            # Resolve indirect next-hop interfaces via resolving route's next-hop group
+            for nh_info in nh_map.values():
+                if not nh_info['interface'] and nh_info.get('resolving_nhg'):
+                    target_hops = nhg_map.get(nh_info['resolving_nhg'], [])
+                    for th in target_hops:
+                        if th.get('interface'):
+                            nh_info['interface'] = th['interface']
+                            break
 
             for r in rt_data.get_descendants('/network-instance/route-table/ipv4-unicast/route'):
                 pfx = getattr(r, 'ipv4_prefix', None)
@@ -220,24 +253,11 @@ class AristaRoutingReports:
                         v4_state = "v4:no routing,"
                         v6_state = "v6:no routing"
                     else:
-                        # Determine protocols dynamically from route table or interfaces
-                        try:
-                            v4_path = build_path('/network-instance[name={name}]/route-table/ipv4-unicast/route[ipv4-prefix=*]', name=name)
-                            v4_data = state.server_data_store.get_data(v4_path, recursive=False)
-                            has_v4 = len(list(v4_data.get_descendants('/network-instance/route-table/ipv4-unicast/route'))) > 0
-                        except Exception:
+                        has_v4 = True
+                        has_v6 = False
+                        if hasattr(ni, 'interface'):
                             has_v4 = True
-
-                        try:
-                            v6_path = build_path('/network-instance[name={name}]/route-table/ipv6-unicast/route[ipv6-prefix=*]', name=name)
-                            v6_data = state.server_data_store.get_data(v6_path, recursive=False)
-                            has_v6 = len(list(v6_data.get_descendants('/network-instance/route-table/ipv6-unicast/route'))) > 0
-                        except Exception:
-                            has_v6 = False
-
-                        protos = []
-                        if has_v4:
-                            protos.append('ipv4')
+                        protos = ['ipv4']
                         if has_v6:
                             protos.append('ipv6')
                         proto_str = ",".join(protos) if protos else "ipv4"
@@ -340,7 +360,7 @@ class AristaRoutingReports:
         lines = [
             f"{'Neighbor ID':<15} {'VRF':<6} {'Pri':<5} {'State':<16} {'Dead Time':<11} {'Address':<15} {'Interface'}"
         ]
-        path = build_path('/network-instance[name=*]/protocols/ospf/area[area-id=*]/interface[interface-name=*]/neighbor[router-id=*]')
+        path = build_path('/network-instance[name=*]/protocols/ospf/instance[name=*]/area[area-id=*]/interface[interface-name=*]/neighbor[router-id=*]')
         found = False
         try:
             data = state.server_data_store.get_data(path, recursive=True)
@@ -348,19 +368,33 @@ class AristaRoutingReports:
                 vrf = ni.name
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
                     ospf = getattr(ni.protocols.get(), 'ospf', None)
-                    if ospf and hasattr(ospf.get(), 'area'):
-                        for area in ospf.get().area.items():
-                            if hasattr(area, 'interface'):
-                                for intf in area.interface.items():
-                                    intf_name = format_arista_intf(intf.interface_name, short=False)
-                                    if hasattr(intf, 'neighbor'):
-                                        for n in intf.neighbor.items():
-                                            found = True
-                                            r_id = getattr(n, 'router_id', '--')
-                                            n_state = getattr(n, 'oper_state', '--').upper()
-                                            ip = getattr(n, 'ipv4_address', '--')
-                                            pri = getattr(n, 'priority', '--')
-                                            lines.append(f"{r_id:<15} {vrf:<6} {str(pri):<5} {n_state:<16} {'--':<11} {ip:<15} {intf_name}")
+                    if ospf and hasattr(ospf.get(), 'instance'):
+                        for inst in ospf.get().instance.items():
+                            if hasattr(inst, 'area'):
+                                for area in inst.area.items():
+                                    if hasattr(area, 'interface'):
+                                        for intf in area.interface.items():
+                                            intf_name = format_arista_intf(intf.interface_name, short=False)
+                                            if hasattr(intf, 'neighbor'):
+                                                for n in intf.neighbor.items():
+                                                    found = True
+                                                    r_id = getattr(n, 'router_id', '--')
+                                                    adj_st = getattr(n, 'adjacency_state', None)
+                                                    n_state = str(adj_st).split(':')[-1].upper() if adj_st else '--'
+                                                    ip = getattr(n, 'address', '--')
+                                                    pri = getattr(n, 'priority', '--')
+                                                    dead = getattr(n, 'dead_time', None)
+                                                    if dead is not None:
+                                                        try:
+                                                            d_sec = int(dead)
+                                                            m, s = divmod(d_sec, 60)
+                                                            h, m = divmod(m, 60)
+                                                            dead_str = f"{h:02d}:{m:02d}:{s:02d}"
+                                                        except Exception:
+                                                            dead_str = str(dead)
+                                                    else:
+                                                        dead_str = '--'
+                                                    lines.append(f"{r_id:<15} {vrf:<6} {str(pri):<5} {n_state:<16} {dead_str:<11} {str(ip):<15} {intf_name}")
         except Exception:
             pass
 
@@ -376,7 +410,7 @@ class AristaRoutingReports:
         lines = [
             f"{'Instance':<13} {'VRF':<12} {'System Id':<15} {'Type':<4} {'Interface':<18} {'Sni':<8} {'Holdtime':<8} {'State'}"
         ]
-        path = build_path('/network-instance[name=*]/protocols/isis/instance[name=*]/adjacency[system-id=*]')
+        path = build_path('/network-instance[name=*]/protocols/isis/instance[name=*]/interface[interface-name=*]/adjacency[neighbor-system-id=*][adjacency-level=*]')
         found = False
         try:
             data = state.server_data_store.get_data(path, recursive=True)
@@ -387,15 +421,19 @@ class AristaRoutingReports:
                     if isis and hasattr(isis.get(), 'instance'):
                         for inst in isis.get().instance.items():
                             inst_name = inst.name
-                            if hasattr(inst, 'adjacency'):
-                                for adj in inst.adjacency.items():
-                                    found = True
-                                    sys_id = getattr(adj, 'system_id', '--')
-                                    intf = format_arista_intf(getattr(adj, 'interface_name', ''), short=False)
-                                    level = getattr(adj, 'level', 'L2')
-                                    oper = getattr(adj, 'oper_state', '--').upper()
-                                    hold = getattr(adj, 'remaining_hold_time', '--')
-                                    lines.append(f"{inst_name:<13} {vrf:<12} {sys_id:<15} {level:<4} {intf:<18} {'-':<8} {str(hold):<8} {oper}")
+                            if hasattr(inst, 'interface'):
+                                for iface in inst.interface.items():
+                                    intf_name = format_arista_intf(iface.interface_name, short=False)
+                                    if hasattr(iface, 'adjacency'):
+                                        for adj in iface.adjacency.items():
+                                            found = True
+                                            sys_id = getattr(adj, 'neighbor_system_id', '--')
+                                            level = getattr(adj, 'adjacency_level', '2')
+                                            type_str = f"L{level}" if not str(level).startswith('L') else str(level)
+                                            raw_st = getattr(adj, 'state', '--')
+                                            oper = str(raw_st).split(':')[-1].upper() if raw_st else '--'
+                                            hold = getattr(adj, 'remaining_holdtime', '--')
+                                            lines.append(f"{inst_name:<13} {vrf:<12} {sys_id:<15} {type_str:<4} {intf_name:<18} {'-':<8} {str(hold):<8} {oper}")
         except Exception:
             pass
 
@@ -412,6 +450,24 @@ class AristaRoutingReports:
             f"{'Interface':<16} {'Instance':<9} {'VRF':<9} {'Area':<16} {'IP Address/Mask':<19} {'Cost':<6} {'State':<7} {'Nbrs'}",
             "---------------- -------- -------- --------------- ------------------ ----- ------ ----"
         ]
+        intf_ip_map = {}
+        try:
+            intf_path = build_path('/interface[name=*]/subinterface[index=*]/ipv4/address')
+            intf_data = state.server_data_store.get_data(intf_path, recursive=False)
+            for intf in intf_data.interface.items():
+                if hasattr(intf, 'subinterface'):
+                    for sub in intf.subinterface.items():
+                        full_name = f"{intf.name}.{sub.index}"
+                        if hasattr(sub, 'ipv4') and sub.ipv4.exists():
+                            ipv4_node = sub.ipv4.get()
+                            if hasattr(ipv4_node, 'address'):
+                                for a in ipv4_node.address.items():
+                                    if hasattr(a, 'ip_prefix') and a.ip_prefix:
+                                        intf_ip_map[full_name] = str(a.ip_prefix)
+                                        break
+        except Exception:
+            pass
+
         path = build_path('/network-instance[name=*]/protocols/ospf/instance[name=*]/area[area-id=*]/interface[interface-name=*]')
         found = False
         try:
@@ -429,23 +485,12 @@ class AristaRoutingReports:
                                     if hasattr(area, 'interface'):
                                         for iface in area.interface.items():
                                             found = True
-                                            intf_disp = format_arista_intf(iface.interface_name, short=False)
+                                            raw_name = str(iface.interface_name)
+                                            intf_disp = format_arista_intf(raw_name, short=False)
                                             cost = getattr(iface, 'interface_cost', 10)
-                                            st = getattr(iface, 'oper_state', 'down').upper()
+                                            st = str(getattr(iface, 'oper_state', 'down')).upper()
                                             nbrs = getattr(iface, 'neighbor_count', 0)
-                                            ip_mask = "--"
-                                            try:
-                                                sub_name = str(iface.interface_name)
-                                                if '.' in sub_name:
-                                                    p_name, s_idx = sub_name.split('.', 1)
-                                                    p_intf = build_path('/interface[name={name}]/subinterface[index={idx}]/ipv4/address', name=p_name, idx=s_idx)
-                                                    d_intf = state.server_data_store.get_data(p_intf, recursive=False)
-                                                    for a in d_intf.get_descendants('/interface/subinterface/ipv4/address'):
-                                                        if hasattr(a, 'ip_prefix') and a.ip_prefix:
-                                                            ip_mask = str(a.ip_prefix)
-                                                            break
-                                            except Exception:
-                                                pass
+                                            ip_mask = intf_ip_map.get(raw_name, "--")
                                             lines.append(f"{intf_disp:<16} {inst_name:<9} {vrf:<9} {str(area_id):<16} {ip_mask:<19} {str(cost):<6} {st:<7} {str(nbrs)}")
         except Exception:
             pass

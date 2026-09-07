@@ -38,11 +38,11 @@ class IpBgpReport:
                 return
                 
             # Print header and neighbor data
-            self._print_bgp_header(bgp_data, network_instance)
+            self._print_bgp_header(output, bgp_data, network_instance)
             neighbors = self._get_neighbor_data(bgp_data)
             
             if neighbors:
-                self._print_neighbor_table(neighbors)
+                self._print_neighbor_table(output, neighbors)
             else:
                 # No neighbors - exit silently
                 pass
@@ -80,7 +80,7 @@ class IpBgpReport:
         except (AttributeError, Exception):
             return False
 
-    def _print_bgp_header(self, bgp_data, network_instance):
+    def _print_bgp_header(self, output, bgp_data, network_instance):
         """Print BGP header information"""
         router_id = "0.0.0.0"
         local_as = "N/A"
@@ -95,12 +95,12 @@ class IpBgpReport:
         except (AttributeError, Exception):
             pass
             
-        print(f"BGP summary information for VRF {network_instance}, address family IPv4 Unicast")
-        print(f"BGP router identifier {router_id}, local AS number {local_as}\n")
+        output.print_line(f"BGP summary information for VRF {network_instance}, address family IPv4 Unicast")
+        output.print_line(f"BGP router identifier {router_id}, local AS number {local_as}\n")
         
         # Print column headers
-        print("Neighbor        V    AS    MsgRcvd   MsgSent   InQ  OutQ  Up/Down   State/PfxRcd")
-        print("-" * 75)
+        output.print_line("Neighbor        V    AS    MsgRcvd   MsgSent   InQ  OutQ  Up/Down   State/PfxRcd")
+        output.print_line("-" * 75)
 
     def _get_neighbor_data(self, bgp_data):
         """Get BGP neighbor data"""
@@ -189,7 +189,7 @@ class IpBgpReport:
             
         return neighbors
 
-    def _print_neighbor_table(self, neighbors):
+    def _print_neighbor_table(self, output, neighbors):
         """Print formatted neighbor table"""
         for neighbor in sorted(neighbors, key=lambda x: str(x.get('peer_address', ''))):
             # Show the correct format based on BGP state
@@ -202,9 +202,9 @@ class IpBgpReport:
             
             in_q_str = str(neighbor.get('in_q', 0))
             out_q_str = str(neighbor.get('out_q', 0))
-            print(f"{neighbor['peer_address']:<14} 4    {neighbor['peer_as']:<6} "
-                  f"{neighbor['msg_rcvd']:<9} {neighbor['msg_sent']:<9} "
-                  f"{in_q_str:<5}{out_q_str:<6}{neighbor['up_time']:<9} {state_display}")
+            output.print_line(f"{neighbor['peer_address']:<14} 4    {neighbor['peer_as']:<6} "
+                              f"{neighbor['msg_rcvd']:<9} {neighbor['msg_sent']:<9} "
+                              f"{in_q_str:<5}{out_q_str:<6}{neighbor['up_time']:<9} {state_display}")
 
     def _format_uptime(self, neighbor):
         """Format uptime for display with safer parsing"""
