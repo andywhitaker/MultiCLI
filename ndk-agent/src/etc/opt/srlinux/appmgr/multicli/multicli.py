@@ -38,7 +38,7 @@ enabled_nos_command = 'enabled-nos'
 repo_url_command = 'repo-url'
 
 # Repo and folders
-tmp_dir = "/etc/opt/srlinux/cli/tmp"
+tmp_dir = "/tmp/multicli_tmp"
 cli_plugins_dir = "/etc/opt/srlinux/cli"
 required_dirs = {"arista", "cisco-nx", "juniper", "nokia"}
 

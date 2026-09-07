@@ -103,7 +103,7 @@ class CiscoInterfaceReports:
                 name = intf.name
                 admin = getattr(intf, 'admin_state', 'disable')
                 oper = getattr(intf, 'oper_state', 'down')
-                mtu = getattr(intf, 'mtu', 1500)
+                mtu = getattr(intf, 'mtu', 1500) or 1500
                 desc = getattr(intf, 'description', '')
                 speed_str = ""
                 if hasattr(intf, 'ethernet') and intf.ethernet.exists():
@@ -636,7 +636,7 @@ class CiscoInterfaceReports:
             oper_status = "up" if oper == "up" else "down"
 
             desc = getattr(intf, 'description', '')
-            mtu = getattr(intf, 'mtu', 1500)
+            mtu = getattr(intf, 'mtu', 1500) or 1500
 
             # Ethernet-specific attributes
             mac_addr = "0000.0000.0000"
@@ -706,6 +706,7 @@ class CiscoInterfaceReports:
             out_bcast = 0
             out_errors = 0
             carrier_transitions = 0
+            intf_resets = 0
 
             if hasattr(intf, 'statistics') and intf.statistics.exists():
                 stats = intf.statistics.get()

@@ -143,9 +143,9 @@ class InterfaceDetails(object):
             raw_mac_address = ""
             if hasattr(intf, 'ethernet') and intf.ethernet.exists():
                 raw_mac_address = getattr(intf.ethernet.get(), 'hw_mac_address', '') or ''
-            mac_address = self.convert_mac(raw_mac_address)
+            mac_address = self.convert_mac(raw_mac_address) or "0000.0000.0000"
             bia_address = mac_address
-            mtu = getattr(intf, 'mtu', 1500)
+            mtu = getattr(intf, 'mtu', 1500) or 1500
             #bandwidth calculation with exception handling
             port_speed = "100G"
             try:
@@ -214,23 +214,12 @@ class InterfaceDetails(object):
                     giants = getattr(eth_stats, 'in_oversize_frames', 0) or 0
                     crc_errors = getattr(eth_stats, 'in_crc_error_frames', 0) or 0
                     pause_input = getattr(eth_stats, 'in_mac_pause_frames', 0) or 0
-                    pause_output = getattr(eth_stats, 'out_mac_pause_frames', 0) or 0
-            #alignment_errors = intf.statistics.get().in_alignment_error_frames
-            #symbol_errors = intf.statistics.get().in_symbol_error_frames
-            input_discards = intf.statistics.get().in_discarded_packets
-            pause_input = intf.ethernet.get().statistics.get().in_mac_pause_frames
-            output_packets = intf.statistics.get().out_packets
-            output_bytes = intf.statistics.get().out_octets
-            sent_broadcasts = intf.statistics.get().out_broadcast_packets
-            sent_multicast = intf.statistics.get().out_multicast_packets
-            output_errors = intf.statistics.get().out_error_packets
-            #collisions = intf.statistics.get().out_collision_packets
-            #late_collisions = intf.statistics.get().out_late_collision_packets
-            #deferred = intf.statistics.get().out_deferred_packets
-            output_discards = intf.statistics.get().out_discarded_packets
-            pause_output = getattr(getattr(getattr(intf.ethernet.get(), 'statistics', None), 'get', lambda: None)(), 'out_mac_pause_frames', None) or 0
-            input_rate = intf.traffic_rate.get().in_bps
-            output_rate = intf.traffic_rate.get().out_bps
+            input_rate = 0
+            output_rate = 0
+            if hasattr(intf, 'traffic_rate') and intf.traffic_rate.exists():
+                tr = intf.traffic_rate.get()
+                input_rate = getattr(tr, 'in_bps', 0) or 0
+                output_rate = getattr(tr, 'out_bps', 0) or 0
             input_utilization = self.calculate_utilization(input_rate, port_speed)
             output_utilization = self.calculate_utilization(output_rate, port_speed)
 
