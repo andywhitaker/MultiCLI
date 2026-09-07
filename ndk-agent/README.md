@@ -66,7 +66,7 @@ The configuration is extremely simple and intuitive, as it only requires two com
 - configure the path to the MultiCLI scripts 
 
 
-Note: Only one vendor can be enabled at a time.
+Note: Select individual vendor NOS ('nokia-sros', 'arista', 'cisco', 'juniper') or 'all' to enable all MultiCLI vendor commands simultaneously.
 
 By default, the agent uses the official [MultiCLI Github repository](https://github.com/srl-labs/MultiCLI), which requires internet access from the SR Linux node via the Management Network Instance. Since this is often not desirable in many environments, a different repository url can also be configured.
 Below is an example configuration using the official repository and enabling the available show commands for Nokia SR OS:
@@ -223,4 +223,18 @@ A:admin@srl-2# / tools system app-management application multicli start
 /system/app-management/application[name=multicli]:
     Application 'multicli' was started
 ```
+
+## Building Debian Packages from Source
+
+The MultiCLI repository includes the agent source code in `ndk-agent/src/` and an automated packaging script:
+
+```bash
+# Build .deb packages for all architectures (amd64, arm64, x86_64)
+./ndk-agent/build-deb.sh
+
+# Or build for a specific architecture:
+./ndk-agent/build-deb.sh amd64
+./ndk-agent/build-deb.sh arm64
+```
+The generated `.deb` packages are output directly to the `ndk-agent/` directory ready for deployment.
 

@@ -1,0 +1,9 @@
+Package: srl-multicli
+Version: 0.1.0
+Section: 
+Priority: optional
+Architecture: amd64
+License: BSD 3-Clause
+Maintainer: nahuel.coco@nokia.com
+Installed-Size: 20
+Description: MultiCLI NDK agent

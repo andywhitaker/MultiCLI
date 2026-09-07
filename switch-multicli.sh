@@ -27,7 +27,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ -z "$TARGET_NOS" ]; then
-    echo "Usage: $0 <all|arista|cisco|juniper|comma-separated> [node_name (default: leaf1)] [--default <arista|cisco|juniper|none>]"
+    echo "Usage: $0 <all|arista|cisco|juniper|nokia|comma-separated> [node_name (default: leaf1)] [--default <arista|cisco|juniper|nokia|none>]"
     echo ""
     echo "Examples:"
     echo "  $0 all leaf1                 # Installs all submodes on leaf1 with default persona (arista)"
@@ -35,6 +35,8 @@ if [ -z "$TARGET_NOS" ]; then
     echo "  $0 all leaf3                 # Installs all submodes on leaf3 with default persona (juniper)"
     echo "  $0 arista leaf1              # Installs only Arista EOS on leaf1"
     echo "  $0 cisco leaf2               # Installs only Cisco NX-OS on leaf2"
+    echo "  $0 juniper leaf3             # Installs only Juniper JUNOS on leaf3"
+    echo "  $0 nokia leaf1               # Installs only Nokia SR OS on leaf1"
     echo "  $0 eos,nxos leaf1            # Installs Arista EOS and Cisco NX-OS on leaf1"
     exit 1
 fi
@@ -95,7 +97,7 @@ IFS=',' read -ra ADDR <<< "$TARGET_NOS"
 for part in "${ADDR[@]}"; do
     case "$part" in
         all|multicli)
-            VENDORS=("arista" "cisco-nx" "juniper")
+            VENDORS=("arista" "cisco-nx" "juniper" "nokia")
             break
             ;;
         arista|eos)
@@ -107,8 +109,11 @@ for part in "${ADDR[@]}"; do
         juniper|junos)
             VENDORS+=("juniper")
             ;;
+        nokia|sros)
+            VENDORS+=("nokia")
+            ;;
         *)
-            echo "Error: Unknown NOS '$part'. Choose 'all', 'arista', 'cisco', or 'juniper'."
+            echo "Error: Unknown NOS '$part'. Choose 'all', 'arista', 'cisco', 'juniper', or 'nokia'."
             exit 1
             ;;
     esac
@@ -117,7 +122,7 @@ done
 echo "==> Configuring node '$TARGET_NODE' with MultiCLI [${VENDORS[*]}] (default persona: $DEFAULT_PERSONA)..."
 
 if [ "$USE_DOCKER_CP" = true ]; then
-    docker exec "$TARGET_NODE" bash -c 'rm -rf /etc/opt/srlinux/cli/plugins/{main_{arista,cisco,juniper}.py,ip_reports.py,mac_reports.py,Cisco_nxos_lldp_neighbor,ethernet_switching_reports.py,show_interfaces.py} /etc/opt/srlinux/cli/{system,routing,interface,ip,mac,eth_switch,bgp,README.md} 2>/dev/null || true; find /etc/opt/srlinux/cli -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true; mkdir -p /etc/opt/srlinux/cli/plugins'
+    docker exec "$TARGET_NODE" bash -c 'rm -rf /etc/opt/srlinux/cli/plugins/{main_{arista,cisco,juniper}.py,ip_reports.py,mac_reports.py,Cisco_nxos_lldp_neighbor,ethernet_switching_reports.py,show_interfaces.py,sros_bgp_report.py,service_report.py,sros_router_report.py} /etc/opt/srlinux/cli/{system,routing,interface,ip,mac,eth_switch,bgp,evpn,README.md} 2>/dev/null || true; find /etc/opt/srlinux/cli -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true; mkdir -p /etc/opt/srlinux/cli/plugins'
     for v in "${VENDORS[@]}"; do
         docker cp "$SCRIPT_DIR/$v"/. "$TARGET_NODE":/etc/opt/srlinux/cli/
     done
@@ -125,7 +130,7 @@ if [ "$USE_DOCKER_CP" = true ]; then
     echo "==> Successfully installed [${VENDORS[*]}] to $TARGET_NODE via docker cp."
 else
     mkdir -p "$TARGET_CLI_DIR"/plugins
-    rm -rf "$TARGET_CLI_DIR"/plugins/main_{arista,cisco,juniper}.py "$TARGET_CLI_DIR"/plugins/{ip_reports.py,mac_reports.py,Cisco_nxos_lldp_neighbor,ethernet_switching_reports.py,show_interfaces.py} "$TARGET_CLI_DIR"/system "$TARGET_CLI_DIR"/routing "$TARGET_CLI_DIR"/interface "$TARGET_CLI_DIR"/ip "$TARGET_CLI_DIR"/mac "$TARGET_CLI_DIR"/eth_switch "$TARGET_CLI_DIR"/bgp "$TARGET_CLI_DIR"/README.md 2>/dev/null || true
+    rm -rf "$TARGET_CLI_DIR"/plugins/{main_{arista,cisco,juniper}.py,ip_reports.py,mac_reports.py,Cisco_nxos_lldp_neighbor,ethernet_switching_reports.py,show_interfaces.py,sros_bgp_report.py,service_report.py,sros_router_report.py} "$TARGET_CLI_DIR"/{system,routing,interface,ip,mac,eth_switch,bgp,evpn,README.md} 2>/dev/null || true
     find "$TARGET_CLI_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
     mkdir -p "$TARGET_CLI_DIR"/plugins
     for v in "${VENDORS[@]}"; do

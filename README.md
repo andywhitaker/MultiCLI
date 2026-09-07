@@ -125,6 +125,12 @@ MultiCLI includes the `switch-multicli.sh` utility to hot-swap NOS personas on a
 
 # Switch leaf3 to Juniper JUNOS
 ./switch-multicli.sh juniper leaf3
+
+# Switch leaf4 to Nokia SR OS
+./switch-multicli.sh nokia leaf4
+
+# Install all personas simultaneously with a default persona
+./switch-multicli.sh all leaf1 --default arista
 ```
 
 ## Automated Validation Suite
