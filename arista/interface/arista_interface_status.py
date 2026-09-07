@@ -51,12 +51,22 @@ class InterfaceStatus(object):
             if interface.oper_state == "up":
                 child.status = "connected"                
             child.vlan = interface.vlan_tagging
-            try:
-                child.duplex = interface.ethernet.get().duplex_mode
-            except: 
-                child.duplex = "full"
-            child.speed = interface.ethernet.get().port_speed
-            child.type = interface.transceiver.get().ethernet_pmd
+            child.duplex = "full"
+            child.speed = "--"
+            if hasattr(interface, 'ethernet') and interface.ethernet.exists():
+                eth_node = interface.ethernet.get()
+                if hasattr(eth_node, 'duplex_mode') and eth_node.duplex_mode:
+                    child.duplex = eth_node.duplex_mode
+                if hasattr(eth_node, 'port_speed') and eth_node.port_speed:
+                    child.speed = eth_node.port_speed
+
+            child.type = "--"
+            if hasattr(interface, 'transceiver') and interface.transceiver.exists():
+                xcvr_node = interface.transceiver.get()
+                if hasattr(xcvr_node, 'ethernet_pmd') and xcvr_node.ethernet_pmd:
+                    child.type = xcvr_node.ethernet_pmd
+                elif hasattr(xcvr_node, 'form_factor') and xcvr_node.form_factor:
+                    child.type = xcvr_node.form_factor
             child.synchronizer.flush_fields(child)
         data.synchronizer.flush_children(data.ifbrief)
 

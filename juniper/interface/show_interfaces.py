@@ -623,28 +623,53 @@ class JperInterfaceSummary():
                             count_mc_queue += 1
                 # Not counting multicast queues, though we have 8 unique queues there as well
                 child.avail_cos_queues = count_uc_queue
-                val = interface.statistics.get(0).in_fcs_error_packets
+                val = 0
+                if hasattr(interface, 'statistics') and interface.statistics.exists():
+                    try:
+                        val = interface.statistics.get(0).in_fcs_error_packets
+                    except Exception:
+                        val = 0
                 child.bit_errors = val if val else 0
-                child.input_rate = interface.traffic_rate.get(0).in_bps
-                child.output_rate = interface.traffic_rate.get(0).out_bps
-                child.intf_index = interface.ifindex
-                macaddr = interface.ethernet.get(0).hw_mac_address
+
+                child.input_rate = 0
+                child.output_rate = 0
+                if hasattr(interface, 'traffic_rate') and interface.traffic_rate.exists():
+                    try:
+                        child.input_rate = interface.traffic_rate.get(0).in_bps
+                        child.output_rate = interface.traffic_rate.get(0).out_bps
+                    except Exception:
+                        pass
+
+                child.intf_index = getattr(interface, 'ifindex', '--')
+                macaddr = '--'
+                if hasattr(interface, 'ethernet') and interface.ethernet.exists():
+                    try:
+                        macaddr = interface.ethernet.get(0).hw_mac_address
+                    except Exception:
+                        pass
                 child.mac_addr = macaddr
                 child.oper_mac_addr = macaddr
-                time_of_last_flap = datetime.datetime.strptime(
-                    interface.last_change, "%Y-%m-%dT%H:%M:%S.%fZ"
-                )
-                time_since_last_flap = datetime.datetime.now() - time_of_last_flap
-                total_seconds = int(time_since_last_flap.total_seconds())
-                weeks, remainder = divmod(total_seconds, 60 * 60 * 24 * 7)
-                days, remainder = divmod(remainder, 60 * 60 * 24)
-                hours, remainder = divmod(remainder, 60 * 60)
-                minutes, __ = divmod(remainder, 60)
-                time_since_last_flap = datetime.datetime.now() - time_of_last_flap
-                child.time_of_last_flap = time_of_last_flap.strftime(
-                    "%Y-%m-%d %H:%M:%S UTC"
-                )
-                child.time_since_last_flap = f"({weeks}w{days}d {hours:02}:{minutes:02} ago)"
+
+                time_of_last_flap_str = getattr(interface, 'last_change', None)
+                if time_of_last_flap_str:
+                    try:
+                        clean_ts = time_of_last_flap_str.rstrip('Z')
+                        time_of_last_flap = datetime.datetime.fromisoformat(clean_ts)
+                        time_since_last_flap = datetime.datetime.now() - time_of_last_flap
+                        total_seconds = int(time_since_last_flap.total_seconds())
+                        weeks, remainder = divmod(total_seconds, 60 * 60 * 24 * 7)
+                        days, remainder = divmod(remainder, 60 * 60 * 24)
+                        hours, remainder = divmod(remainder, 60 * 60)
+                        minutes, __ = divmod(remainder, 60)
+                        child.time_of_last_flap = time_of_last_flap.strftime("%Y-%m-%d %H:%M:%S UTC")
+                        child.time_since_last_flap = f"({weeks}w{days}d {hours:02}:{minutes:02} ago)"
+                    except Exception:
+                        child.time_of_last_flap = "Never"
+                        child.time_since_last_flap = "Never"
+                else:
+                    child.time_of_last_flap = "Never"
+                    child.time_since_last_flap = "Never"
+
                 # These attributes were given placeholder values due to no direct
                 # mapping being available or a lack of understanding the source
                 # material. These can be extended upon later.
@@ -653,7 +678,7 @@ class JperInterfaceSummary():
                 child.active_defects = "N/A"
                 child.bpdu_errors = "N/A"
                 child.ethernet_switching_errors = "N/A"
-                child.snmp_intf_index = "N/A"
+                child.snmp_intf_index = str(interface.ifindex) if hasattr(interface, 'ifindex') and interface.ifindex is not None else "N/A"
                 child.fec_corr_errors = "N/A"
                 child.fec_corr_error_rate = "N/A"
                 child.fec_uncorr_errors = "N/A"
@@ -669,29 +694,34 @@ class JperInterfaceSummary():
                     continue
                 subifchild = child.subinterface.create(subinterface.name)
                 subifchild_flags_info = "Up" if subinterface.oper_state == "up" else "Down"
-                if interface.vlan_tagging:
-                    vlan_id = (
-                        subinterface.vlan.get(0)
-                        .encap.get(0)
-                        .single_tagged.get(0)
-                        .vlan_id
-                    )
-                    subifchild_flags_addition = (
-                        f" VLAN-Tag [ {interface.tpid[-6:]}.{vlan_id} ] "
-                    )
-                    subifchild_flags_info += subifchild_flags_addition
+                if getattr(interface, 'vlan_tagging', False):
+                    try:
+                        vlan_id = (
+                            subinterface.vlan.get(0)
+                            .encap.get(0)
+                            .single_tagged.get(0)
+                            .vlan_id
+                        )
+                        tpid = getattr(interface, 'tpid', '')
+                        tpid_suffix = tpid[-6:] if tpid else '0x8100'
+                        subifchild_flags_addition = (
+                            f" VLAN-Tag [ {tpid_suffix}.{vlan_id} ] "
+                        )
+                        subifchild_flags_info += subifchild_flags_addition
+                    except Exception:
+                        pass
                 subifchild.flags_first = subifchild_flags_info
                 subifchild.encap = "ENET2" if interface.ethernet.exists() else ""
                 subifchild.intf_index = subinterface.ifindex
                 subifchild.snmp_intf_index = "N/A"
-                if not _is_virtual_interface(interface.name):
-                    # Subinterface 0 might not have statistics and original version
-                    # does not show statistics for lo0 which would be the
-                    # corresponding interface
-                    subifchild.input_pkts = subinterface.statistics.get(0).in_packets
-                    subifchild.output_pkts = subinterface.statistics.get(0).out_packets
+                if not _is_virtual_interface(interface.name) and hasattr(subinterface, 'statistics') and subinterface.statistics.exists():
+                    try:
+                        subifchild.input_pkts = subinterface.statistics.get(0).in_packets
+                        subifchild.output_pkts = subinterface.statistics.get(0).out_packets
+                    except Exception:
+                        subifchild.input_pkts = 0
+                        subifchild.output_pkts = 0
                 else:
-                    # thus in those cases we set the value to 0
                     subifchild.input_pkts = 0
                     subifchild.output_pkts = 0
                 subifchild.mtu = subinterface.ip_mtu if subinterface.ip_mtu else "Unlimited"
@@ -913,9 +943,16 @@ def _util_populate_intf_brief(child, interface, platform):
     # (or enabled) in all circumstances
     # Any case where autonegotiation on a D1 is controlled via configuration is not handled
     child.auto_negotiation = "Enabled"
-    chassis_type = platform.get(0).chassis.get(0).type
-    if "d1" in chassis_type.lower():
-        child.auto_negotiation = "Disabled"
+    if interface.ethernet.exists():
+        try:
+            state_eth = interface.ethernet.get(0)
+            pspeed = getattr(state_eth, 'port_speed', '')
+            if pspeed and any(s in str(pspeed) for s in ['10G', '25G', '40G', '100G', '400G']):
+                child.auto_negotiation = "Disabled"
+            else:
+                child.auto_negotiation = "Enabled"
+        except Exception:
+            pass
 
     # These attributes were given placeholder values due to no direct
     # mapping being available or a lack of understanding the source

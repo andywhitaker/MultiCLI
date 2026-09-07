@@ -143,6 +143,18 @@ class IpBgpReport:
                     if sm and hasattr(sm, 'total_messages'):
                         messages_sent = sm.total_messages
                 
+                in_q = 0
+                if hasattr(neighbor, 'received_messages'):
+                    rm = neighbor.received_messages.get()
+                    if rm and hasattr(rm, 'queue_depth') and rm.queue_depth is not None:
+                        in_q = rm.queue_depth
+
+                out_q = 0
+                if hasattr(neighbor, 'sent_messages'):
+                    sm = neighbor.sent_messages.get()
+                    if sm and hasattr(sm, 'queue_depth') and sm.queue_depth is not None:
+                        out_q = sm.queue_depth
+                
                 # Get prefix information
                 prefixes_received = 0
                 if hasattr(neighbor, 'afi_safi'):
@@ -162,6 +174,8 @@ class IpBgpReport:
                     'peer_as': peer_as,
                     'msg_rcvd': messages_received,
                     'msg_sent': messages_sent,
+                    'in_q': in_q,
+                    'out_q': out_q,
                     'state': session_state,
                     'state_lower': state_lower,
                     'pfx_received': prefixes_received,
@@ -186,9 +200,11 @@ class IpBgpReport:
             else:
                 state_display = neighbor.get('state', 'Idle')
             
+            in_q_str = str(neighbor.get('in_q', 0))
+            out_q_str = str(neighbor.get('out_q', 0))
             print(f"{neighbor['peer_address']:<14} 4    {neighbor['peer_as']:<6} "
                   f"{neighbor['msg_rcvd']:<9} {neighbor['msg_sent']:<9} "
-                  f"0    0    {neighbor['up_time']:<9} {state_display}")
+                  f"{in_q_str:<5}{out_q_str:<6}{neighbor['up_time']:<9} {state_display}")
 
     def _format_uptime(self, neighbor):
         """Format uptime for display with safer parsing"""

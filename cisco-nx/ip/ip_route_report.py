@@ -239,9 +239,14 @@ class IpRouteReport:
     def _display_routes(self, routes, network_instance):
         """Display formatted routes"""
         # Check for default route
-        default_route_exists = any(route['prefix'] == '0.0.0.0/0' for route in routes)
-        if not default_route_exists:
-            print("Gateway of last resort is not set")
+        default_route = next((route for route in routes if route['prefix'] == '0.0.0.0/0'), None)
+        if default_route and default_route.get('next_hops'):
+            nh_ip = default_route['next_hops'][0].get('ip', 'unknown')
+            print(f"Gateway of last resort is {nh_ip} to network 0.0.0.0\n")
+        elif default_route and default_route.get('interface'):
+            print(f"Gateway of last resort is {default_route['interface']} to network 0.0.0.0\n")
+        else:
+            print("Gateway of last resort is not set\n")
 
         for route in routes:
             self._display_route(route)
