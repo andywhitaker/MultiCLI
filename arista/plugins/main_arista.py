@@ -51,9 +51,6 @@ try:
     from arista_interface_reports import AristaInterfaceReports
     from arista_routing_reports import AristaRoutingReports
 except Exception:
-    import traceback
-    with open('/tmp/plugin_import.log', 'a') as f:
-        traceback.print_exc(file=f)
     raise
 
 class Plugin(CliPlugin):

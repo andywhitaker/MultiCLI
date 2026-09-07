@@ -333,10 +333,15 @@ class AristaInterfaceReports:
                 status_flag = "U" if oper == "up" else "D"
                 po_name = format_arista_intf(lag_name, short=True) + f"({status_flag})"
                 
+                proto_val = "STATIC"
                 members = []
-                # Check lag members
+                # Check lag members and protocol
                 if hasattr(lag, 'lag') and lag.lag.exists():
                     lag_obj = lag.lag.get()
+                    if hasattr(lag_obj, 'lacp') and lag_obj.lacp.exists():
+                        proto_val = "LACP(a)"
+                    elif hasattr(lag_obj, 'lag_type') and str(getattr(lag_obj, 'lag_type', '')).lower() == 'lacp':
+                        proto_val = "LACP(a)"
                     if hasattr(lag_obj, 'member_interface'):
                         for m in lag_obj.member_interface.items():
                             m_name = format_arista_intf(m.name, short=True)
@@ -347,7 +352,7 @@ class AristaInterfaceReports:
                 ports_str = " ".join(members) if members else "-"
                 lags.append({
                     'po': po_name,
-                    'proto': 'LACP(a)',
+                    'proto': proto_val,
                     'ports': ports_str
                 })
         except Exception:
@@ -428,7 +433,7 @@ class AristaInterfaceReports:
                     'bias': bias_cur,
                     'tx_power': tx_pwr,
                     'rx_power': rx_pwr,
-                    'last_update': "0:00:01 ago" if is_present else "N/A",
+                    'last_update': "--" if is_present else "N/A",
                     'is_present': is_present,
                     'form_factor': form_factor,
                     'vendor': vendor,

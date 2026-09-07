@@ -99,12 +99,55 @@ class JunosSystemReports:
         boot_dt = now - datetime.timedelta(seconds=uptime_seconds)
         boot_str = boot_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
 
+        # Dynamic time source check
+        time_source = "LOCAL CLOCK"
+        try:
+            ntp_path = build_path('/system/ntp')
+            ntp_data = state.server_data_store.get_data(ntp_path, recursive=True)
+            ntp_node = ntp_data.system.get().ntp.get()
+            sync_st = getattr(ntp_node, 'synchronization_state', None)
+            if sync_st and str(sync_st).lower() in ('synchronized', 'sync'):
+                time_source = "NTP CLOCK"
+        except Exception:
+            pass
+
+        # Dynamic last configured check
+        last_cfg_str = f"{boot_str} {ago_str}"
+        try:
+            cfg_path = build_path('/system/configuration')
+            cfg_data = state.server_data_store.get_data(cfg_path, recursive=True)
+            cfg_node = cfg_data.system.get().configuration.get()
+            commits = []
+            if hasattr(cfg_node, 'commit'):
+                for c in cfg_node.commit.items():
+                    c_end = getattr(c, 'ended', None) or getattr(c, 'started', None)
+                    c_user = getattr(c, 'username', '') or ''
+                    if c_end:
+                        commits.append((c_end, c_user))
+            if commits:
+                latest_commit = commits[-1]
+                ts_raw = str(latest_commit[0])
+                c_user = latest_commit[1]
+                ts_iso = ts_raw.split('(')[0].strip() if '(' in ts_raw else ts_raw
+                ts_ago = ('(' + ts_raw.split('(')[1].strip()) if '(' in ts_raw else ""
+                if 'Z' in ts_iso:
+                    ts_iso = ts_iso.replace('Z', '+00:00')
+                try:
+                    c_dt = datetime.datetime.fromisoformat(ts_iso)
+                    user_str = f" by {c_user}" if c_user else ""
+                    last_cfg_str = f"{c_dt.strftime('%Y-%m-%d %H:%M:%S UTC')} {ts_ago}{user_str}".strip()
+                except Exception:
+                    user_str = f" by {c_user}" if c_user else ""
+                    last_cfg_str = f"{ts_raw}{user_str}"
+        except Exception:
+            pass
+
         lines = [
             f"Current time: {curr_time_str}",
-            "Time Source: NTP CLOCK",
+            f"Time Source: {time_source}",
             f"System booted: {boot_str} {ago_str}",
             f"Protocols started: {boot_str} {ago_str}",
-            f"Last configured: {boot_str} {ago_str} by admin",
+            f"Last configured: {last_cfg_str}",
             f" {now.strftime('%I:%M%p')}  up {days} days,  {hours:02}:{minutes:02}"
         ]
 
@@ -211,8 +254,9 @@ class JunosSystemReports:
         except Exception:
             pass
 
-        # Memory
-        mem_total, mem_free, mem_avail, buffers, cached = "0", "0", "0", "0", "0"
+        # Memory & Swap
+        mem_total, mem_free, buffers, cached = "0", "0", "0", "0"
+        active_kb, inact_kb, swap_total, swap_free = "0", "0", "0", "0"
         try:
             with open('/proc/meminfo') as f:
                 for line in f:
@@ -220,19 +264,28 @@ class JunosSystemReports:
                         mem_total = line.split()[1]
                     elif line.startswith('MemFree:'):
                         mem_free = line.split()[1]
-                    elif line.startswith('MemAvailable:'):
-                        mem_avail = line.split()[1]
+                    elif line.startswith('Active:'):
+                        active_kb = line.split()[1]
+                    elif line.startswith('Inactive:'):
+                        inact_kb = line.split()[1]
                     elif line.startswith('Buffers:'):
                         buffers = line.split()[1]
                     elif line.startswith('Cached:'):
                         cached = line.split()[1]
+                    elif line.startswith('SwapTotal:'):
+                        swap_total = line.split()[1]
+                    elif line.startswith('SwapFree:'):
+                        swap_free = line.split()[1]
         except Exception:
             pass
 
         mem_tot_m = int(mem_total) // 1024 if mem_total.isdigit() else 0
         mem_free_m = int(mem_free) // 1024 if mem_free.isdigit() else 0
-        active_m = int(mem_total) // 2048 if mem_total.isdigit() else 0
+        active_m = int(active_kb) // 1024 if active_kb.isdigit() else 0
+        inact_m = int(inact_kb) // 1024 if inact_kb.isdigit() else 0
         wired_m = (int(buffers) + int(cached)) // 1024 if buffers.isdigit() and cached.isdigit() else 0
+        swap_tot_m = int(swap_total) // 1024 if swap_total.isdigit() else 0
+        swap_free_m = int(swap_free) // 1024 if swap_free.isdigit() else 0
 
         # Processes
         ps_rows = []
@@ -278,8 +331,8 @@ class JunosSystemReports:
         lines.append(f"last pid: {last_pid:>6};  load averages:  {load1},  {load5},  {load15}  up {up_str}    {now_time}")
         lines.append(f"{total_procs} processes: {running} running, {sleeping} sleeping")
         lines.append(cpu_line)
-        lines.append(f"Mem: {active_m}M Active, {mem_free_m}M Inact, {wired_m}M Wired, {mem_free_m}M Free")
-        lines.append(f"Swap: 0M Total, 0M Free")
+        lines.append(f"Mem: {active_m}M Active, {inact_m}M Inact, {wired_m}M Wired, {mem_free_m}M Free")
+        lines.append(f"Swap: {swap_tot_m}M Total, {swap_free_m}M Free")
 
         if not summary:
             lines.append("")

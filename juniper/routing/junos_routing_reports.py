@@ -149,7 +149,7 @@ class JunosRoutingReports:
                         break
 
                 first_intf = intfs[0] if intfs else ""
-                lines.append(f"{'default':<23} {name:<21} {str(vlan_tag):<8} {first_intf}")
+                lines.append(f"{name:<23} {name:<21} {str(vlan_tag):<8} {first_intf}")
                 for extra in intfs[1:]:
                     lines.append(f"{'':<23} {'':<21} {'':<8} {extra}")
         except Exception:
@@ -174,17 +174,55 @@ class JunosRoutingReports:
                 members = []
                 if hasattr(intf, 'lag') and intf.lag.exists():
                     lag_node = intf.lag.get()
-                    if hasattr(lag_node, 'member_interface'):
-                        for mem in lag_node.member_interface.items():
-                            m_name = format_junos_intf(mem.name, with_unit=False)
-                            members.append(m_name)
-                            oper = getattr(mem, 'oper_state', '-')
-                            active_str = "Active" if oper == "up" else "Down"
-                            lines.append(f"      {m_name:<14} Actor    --    --   --   --   --    --      --      {active_str}")
+                    mem_items = []
+                    if hasattr(lag_node, 'member'):
+                        mem_items = lag_node.member.items()
+                    elif hasattr(lag_node, 'member_interface'):
+                        mem_items = lag_node.member_interface.items()
 
-                lines.append("    LACP protocol:        Receive State  Transmit State          Mux State")
-                for m in members:
-                    lines.append(f"      {m:<24} Current   --                      --")
+                    for mem in mem_items:
+                        m_name = format_junos_intf(mem.name, with_unit=False)
+                        oper = getattr(mem, 'oper_state', '-')
+                        role = "Actor"
+                        exp = "No"
+                        df = "No"
+                        dist = "No"
+                        col = "No"
+                        syn = "No"
+                        aggr = "Yes"
+                        timeout = "Fast"
+                        activity = "Active" if oper == "up" else "Down"
+                        rx_state = "Current"
+                        tx_state = "Fast periodic"
+                        mux_state = "Collecting distributing" if oper == "up" else "Detached"
+
+                        lacp_obj = getattr(mem, 'lacp', None)
+                        if lacp_obj:
+                            l_node = lacp_obj.get() if hasattr(lacp_obj, 'get') else lacp_obj
+                            if hasattr(l_node, 'distributing'):
+                                dist = "Yes" if getattr(l_node, 'distributing') else "No"
+                            if hasattr(l_node, 'collecting'):
+                                col = "Yes" if getattr(l_node, 'collecting') else "No"
+                            if hasattr(l_node, 'synchronization'):
+                                syn_val = str(getattr(l_node, 'synchronization', '')).lower()
+                                syn = "Yes" if "in-sync" in syn_val or "true" in syn_val else "No"
+                            if hasattr(l_node, 'aggregatable'):
+                                aggr = "Yes" if getattr(l_node, 'aggregatable') else "No"
+                            if hasattr(l_node, 'timeout'):
+                                t_val = str(getattr(l_node, 'timeout', '')).lower()
+                                timeout = "Fast" if "short" in t_val or "fast" in t_val else "Slow"
+                            if hasattr(l_node, 'activity'):
+                                act_val = str(getattr(l_node, 'activity', '')).capitalize()
+                                if act_val:
+                                    activity = act_val
+
+                        lines.append(f"      {m_name:<14} {role:<7} {exp:<5} {df:<4} {dist:<5} {col:<4} {syn:<4} {aggr:<5} {timeout:<8} {activity}")
+                        members.append((m_name, rx_state, tx_state, mux_state))
+
+                if members:
+                    lines.append("    LACP protocol:        Receive State  Transmit State          Mux State")
+                    for m_name, rx, tx, mux in members:
+                        lines.append(f"      {m_name:<24} {rx:<14} {tx:<23} {mux}")
                 lines.append("")
         except Exception:
             pass
@@ -221,20 +259,30 @@ class JunosRoutingReports:
         direct_count = 0
         local_count = 0
         bgp_count = 0
+        static_count = 0
+        ospf_count = 0
+        isis_count = 0
         total_routes = 0
 
         path_routes = build_path('/network-instance[name=default]/route-table/ipv4-unicast/route[ipv4-prefix=*]')
         try:
             data_routes = state.server_data_store.get_data(path_routes, recursive=True)
             for r in data_routes.get_descendants('/network-instance/route-table/ipv4-unicast/route'):
-                owner = getattr(r, 'route_owner', getattr(r, 'route_type', 'connected')).lower()
                 total_routes += 1
-                if 'connected' in owner or 'direct' in owner:
+                rtype = str(getattr(r, 'route_type', '')).lower()
+                rowner = str(getattr(r, 'route_owner', '')).lower()
+                if 'connected' in rowner or 'direct' in rowner or rtype == 'local':
                     direct_count += 1
-                elif 'local' in owner:
+                elif 'host' in rtype or 'local' in rowner:
                     local_count += 1
-                elif 'bgp' in owner:
+                elif 'bgp' in rtype or 'bgp' in rowner:
                     bgp_count += 1
+                elif 'static' in rtype or 'static' in rowner:
+                    static_count += 1
+                elif 'ospf' in rtype or 'ospf' in rowner:
+                    ospf_count += 1
+                elif 'isis' in rtype or 'isis' in rowner:
+                    isis_count += 1
                 else:
                     direct_count += 1
         except Exception:
@@ -246,7 +294,10 @@ class JunosRoutingReports:
             f"inet.0: {total_routes} destinations, {total_routes} routes ({total_routes} active, 0 holddown, 0 hidden)",
             f"{'Direct:':>20} {direct_count:>10} routes, {direct_count:>10} active",
             f"{'Local:':>20} {local_count:>10} routes, {local_count:>10} active",
-            f"{'BGP:':>20} {bgp_count:>10} routes, {bgp_count:>10} active"
+            f"{'BGP:':>20} {bgp_count:>10} routes, {bgp_count:>10} active",
+            f"{'Static:':>20} {static_count:>10} routes, {static_count:>10} active",
+            f"{'OSPF:':>20} {ospf_count:>10} routes, {ospf_count:>10} active",
+            f"{'IS-IS:':>20} {isis_count:>10} routes, {isis_count:>10} active"
         ]
 
         output.print_line("\n".join(lines))
@@ -320,7 +371,8 @@ class JunosRoutingReports:
 
         num_groups = len(peer_groups) if peer_groups else (1 if peers else 0)
 
-        # Query route count for inet.0
+        # Query route counts for active tables
+        tables = []
         pfx_count = 0
         try:
             rt_path = build_path('/network-instance[name=default]/route-table/ipv4-unicast/route[ipv4-prefix=*]')
@@ -328,11 +380,22 @@ class JunosRoutingReports:
             pfx_count = len(list(rt_data.get_descendants('/network-instance/route-table/ipv4-unicast/route')))
         except Exception:
             pass
+        tables.append(("inet.0", pfx_count))
+
+        try:
+            rt6_path = build_path('/network-instance[name=default]/route-table/ipv6-unicast/route[ipv6-prefix=*]')
+            rt6_data = state.server_data_store.get_data(rt6_path, recursive=False)
+            pfx6_count = len(list(rt6_data.get_descendants('/network-instance/route-table/ipv6-unicast/route')))
+            if pfx6_count > 0:
+                tables.append(("inet6.0", pfx6_count))
+        except Exception:
+            pass
 
         down_peers = sum(1 for p in peers if p['state'].lower() != 'established')
         lines.append(f"Groups: {num_groups} Peers: {len(peers)} Down peers: {down_peers}")
         lines.append("Table          Tot Paths  Act Paths Suppressed    History Damp State    Pending")
-        lines.append(f"inet.0                 {pfx_count:<10} {pfx_count:<10} 0          0          0          0")
+        for t_name, t_cnt in tables:
+            lines.append(f"{t_name:<14} {t_cnt:<10} {t_cnt:<10} 0          0          0          0")
         lines.append(f"{'Peer':<24} {'AS':<7} {'InPkt':<9} {'OutPkt':<10} {'OutQ':<6} {'Flaps':<5} {'Last Up/Down':<12} {'State'}")
 
         for p in peers:

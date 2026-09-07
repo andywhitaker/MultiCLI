@@ -1,26 +1,57 @@
 # Custom CLI Plugins for Arista EOS
 
-The following CLI plugins are available in this repo:
+MultiCLI allows users to execute familiar Arista EOS commands on Nokia SR Linux switches with matching output and dynamic state learning.
 
-> [!NOTE]
-> At the time of releasing these scripts, SR Linux did not support a custom CLI path that was loaded on top of an existing native path. Due to this reason, some EOS commands start with the syntax `show eos`. This will be fixed in a future release.
+## Supported Commands
 
-| Command | Contributor |
+### System & Hardware
+| Command | Description |
 |---|---|
-| `show eos interface` | [mfzhsn](https://github.com/mfzhsn) |
-| `show eos interface status` | [mfzhsn](https://github.com/mfzhsn) |
-| `show arp` | [mfzhsn](https://github.com/mfzhsn) |
-| `show ip bgp summary` | [sajusal](https://github.com/sajusal) |
-| `show bgp evpn route-type auto-discovery` | [sajusal](https://github.com/sajusal) |
-| `show bgp evpn route-type mac-ip` | [sajusal](https://github.com/sajusal) |
-| `show bgp evpn route-type imet` | [sajusal](https://github.com/sajusal) |
-| `show bgp evpn route-type ethernet-segment` | [sajusal](https://github.com/sajusal) |
-| `show bgp evpn route-type ip-prefix` | [sajusal](https://github.com/sajusal) |
-| `show bgp evpn summary` | [sajusal](https://github.com/sajusal) |
+| `show version` | Arista EOS software version, uptime, memory, and model info |
+| `show hostname` | System FQDN and hostname |
+| `show clock` | System clock and timezone |
+| `show inventory` | System inventory and hardware serials |
+| `show environment [cooling\|power\|temperature]` | Fan speeds, power supplies, and temperature sensors |
+| `show module` | Linecard, supervisor, and fabric module status |
+| `show processes top once` | Process table and memory/swap statistics |
+
+### Interfaces & Layer 2
+| Command | Description |
+|---|---|
+| `show ip interface brief` | IPv4 address and operational status per interface |
+| `show interfaces description` / `show interface description` | Interface descriptions and line protocol status |
+| `show interfaces transceiver [detail]` / `show interface transceiver [detail]` | Optical transceiver diagnostics and DDM |
+| `show port-channel summary` | LAG / Port-channel summary with protocol and member ports |
+| `show mac address-table` | MAC address table with VLAN, type, and interface |
+| `show vlan` | Configured VLANs, status, and member ports |
+| `show mlag` | MLAG operational status, peer link, and multi-homing ES |
+
+### Routing & Protocols
+| Command | Description |
+|---|---|
+| `show ip route [vrf default]` | Routing table with protocol codes and next-hops |
+| `show vrf` | VRF routing instances, protocols, and interfaces |
+| `show ip arp` | ARP cache resolution table |
+| `show ip bgp summary` | BGP IPv4 unicast neighbor summary |
+| `show bgp evpn summary` | BGP EVPN neighbor summary |
+| `show bgp evpn route-type [auto-discovery\|mac-ip\|imet\|ethernet-segment\|ip-prefix]` | BGP EVPN route-type specific outputs |
+| `show ip ospf neighbor` | OSPF neighbor adjacencies and states |
+| `show ip ospf interface brief` | OSPF interface state, cost, and area |
+| `show isis neighbors` | IS-IS neighbor adjacencies and hold times |
+| `show lldp neighbors [detail]` | LLDP discovery neighbors and details |
 
 ## Testing
 
-Deploy the EVPN lab. Login to any leaf or spine node using `auser/auser` and try any of the above commands.
+Deploy the containerlab topology and log in to a switch configured with the Arista EOS persona (or use `auser/auser`):
+
+```bash
+docker exec -it leaf1 sr_cli
+```
+
+Or switch any node on-the-fly using the helper script:
+```bash
+./switch-multicli.sh arista leaf1
+```
 
 ## Custom CLI Plugin scripts
 

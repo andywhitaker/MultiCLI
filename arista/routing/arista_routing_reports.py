@@ -111,17 +111,18 @@ class AristaRoutingReports:
             lines.append("Gateway of last resort is set\n")
         else:
             lines.append("Gateway of last resort is not set\n")
-            # Sort routes by IP network
-            try:
-                sorted_routes = sorted(routes, key=lambda x: ipaddress.ip_network(x['prefix']).network_address)
-            except Exception:
-                sorted_routes = routes
 
-            for r in sorted_routes:
-                if 'connected' in r['owner'] or 'direct' in r['owner'] or 'local' in r['owner']:
-                    lines.append(f"{r['code']:<5} {r['prefix']} is directly connected")
-                else:
-                    lines.append(f"{r['code']:<5} {r['prefix']} [{r['pref']}/{r['metric']}]")
+        # Sort routes by IP network
+        try:
+            sorted_routes = sorted(routes, key=lambda x: ipaddress.ip_network(x['prefix']).network_address)
+        except Exception:
+            sorted_routes = routes
+
+        for r in sorted_routes:
+            if 'connected' in r['owner'] or 'direct' in r['owner'] or 'local' in r['owner']:
+                lines.append(f"{r['code']:<5} {r['prefix']} is directly connected")
+            else:
+                lines.append(f"{r['code']:<5} {r['prefix']} [{r['pref']}/{r['metric']}]")
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
@@ -131,37 +132,76 @@ class AristaRoutingReports:
         """Display Arista EOS style 'show vrf'."""
         lines = [
             "Maximum number of vrfs allowed: 4095",
-            f"  {'Vrf':<9} {'RD':<12} {'Protocols':<14} {'State':<19} {'Interfaces'}",
-            f"--------- ------------ -------------- ------------------- ---------------------"
+            f"  {'Vrf':<9} {'RD':<14} {'Protocols':<14} {'State':<19} {'Interfaces'}",
+            f"--------- -------------- -------------- ------------------- ---------------------"
         ]
         path = build_path('/network-instance[name=*]')
         try:
             data = state.server_data_store.get_data(path, recursive=True)
             for ni in sorted(data.network_instance.items(), key=lambda x: str(x.name)):
-                name = ni.name
-                rd = "-"
-                if hasattr(ni, 'protocols') and ni.protocols.exists():
-                    bgp_vpn = getattr(ni.protocols.get(), 'bgp_vpn', None)
-                    if bgp_vpn and hasattr(bgp_vpn.get(), 'bgp_instance'):
-                        for bi in bgp_vpn.get().bgp_instance.items():
-                            rd_val = getattr(bi, 'route_distinguisher', None)
-                            if rd_val:
-                                m = re.search(r'rd\s+([0-9\.:]+)', str(rd_val))
-                                if m:
-                                    rd = m.group(1)
-                                else:
-                                    rd = str(getattr(rd_val, 'rd', rd_val)).strip()
-                                break
+                try:
+                    name = ni.name
+                    ni_type = getattr(ni, 'type', 'default')
+                    rd = "-"
 
-                # Interfaces
-                intfs = []
-                if hasattr(ni, 'interface'):
-                    for intf in ni.interface.items():
-                        intfs.append(format_arista_intf(intf.name, short=False))
+                    if hasattr(ni, 'protocols') and ni.protocols.exists():
+                        p_obj = ni.protocols.get()
+                        bgp_vpn = getattr(p_obj, 'bgp_vpn', None)
+                        if bgp_vpn and hasattr(bgp_vpn, 'exists') and bgp_vpn.exists():
+                            bv_obj = bgp_vpn.get()
+                            if hasattr(bv_obj, 'bgp_instance'):
+                                for bi in bv_obj.bgp_instance.items():
+                                    rd_val = getattr(bi, 'route_distinguisher', None)
+                                    if rd_val:
+                                        m = re.search(r'rd\s+([0-9\.:]+)', str(rd_val))
+                                        if m:
+                                            rd = m.group(1)
+                                        else:
+                                            rd = str(getattr(rd_val, 'rd', rd_val)).strip()
+                                        break
 
-                intf_str = ", ".join(intfs[:3]) if intfs else "-"
-                lines.append(f"  {name:<9} {rd:<12} {'ipv4,ipv6':<14} {'v4:routing,':<19} {intf_str}")
-                lines.append(f"  {'':<9} {'':<12} {'':<14} {'v6:routing':<19}")
+                    # Interfaces
+                    intfs = []
+                    has_v4 = False
+                    has_v6 = False
+                    if hasattr(ni, 'interface'):
+                        for intf in ni.interface.items():
+                            intfs.append(format_arista_intf(intf.name, short=False))
+
+                    if ni_type == 'mac-vrf':
+                        proto_str = "-"
+                        v4_state = "v4:no routing,"
+                        v6_state = "v6:no routing"
+                    else:
+                        # Determine protocols dynamically from route table or interfaces
+                        try:
+                            v4_path = build_path('/network-instance[name={name}]/route-table/ipv4-unicast/route[ipv4-prefix=*]', name=name)
+                            v4_data = state.server_data_store.get_data(v4_path, recursive=False)
+                            has_v4 = len(list(v4_data.get_descendants('/network-instance/route-table/ipv4-unicast/route'))) > 0
+                        except Exception:
+                            has_v4 = True
+
+                        try:
+                            v6_path = build_path('/network-instance[name={name}]/route-table/ipv6-unicast/route[ipv6-prefix=*]', name=name)
+                            v6_data = state.server_data_store.get_data(v6_path, recursive=False)
+                            has_v6 = len(list(v6_data.get_descendants('/network-instance/route-table/ipv6-unicast/route'))) > 0
+                        except Exception:
+                            has_v6 = False
+
+                        protos = []
+                        if has_v4:
+                            protos.append('ipv4')
+                        if has_v6:
+                            protos.append('ipv6')
+                        proto_str = ",".join(protos) if protos else "ipv4"
+                        v4_state = "v4:routing," if has_v4 else "v4:no routing,"
+                        v6_state = "v6:routing" if has_v6 else "v6:no routing"
+
+                    intf_str = ", ".join(intfs[:3]) if intfs else "-"
+                    lines.append(f"  {name:<9} {rd:<14} {proto_str:<14} {v4_state:<19} {intf_str}")
+                    lines.append(f"  {'':<9} {'':<14} {'':<14} {v6_state:<19}")
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -346,7 +386,20 @@ class AristaRoutingReports:
                                             cost = getattr(iface, 'interface_cost', 10)
                                             st = getattr(iface, 'oper_state', 'down').upper()
                                             nbrs = getattr(iface, 'neighbor_count', 0)
-                                            lines.append(f"{intf_disp:<16} {inst_name:<9} {vrf:<9} {str(area_id):<16} {'--':<19} {str(cost):<6} {st:<7} {str(nbrs)}")
+                                            ip_mask = "--"
+                                            try:
+                                                sub_name = str(iface.interface_name)
+                                                if '.' in sub_name:
+                                                    p_name, s_idx = sub_name.split('.', 1)
+                                                    p_intf = build_path('/interface[name={name}]/subinterface[index={idx}]/ipv4/address', name=p_name, idx=s_idx)
+                                                    d_intf = state.server_data_store.get_data(p_intf, recursive=False)
+                                                    for a in d_intf.get_descendants('/interface/subinterface/ipv4/address'):
+                                                        if hasattr(a, 'ip_prefix') and a.ip_prefix:
+                                                            ip_mask = str(a.ip_prefix)
+                                                            break
+                                            except Exception:
+                                                pass
+                                            lines.append(f"{intf_disp:<16} {inst_name:<9} {vrf:<9} {str(area_id):<16} {ip_mask:<19} {str(cost):<6} {st:<7} {str(nbrs)}")
         except Exception:
             pass
 
@@ -376,13 +429,21 @@ class AristaRoutingReports:
                         for es in bi.ethernet_segment.items():
                             found = True
                             esi = getattr(es, 'esi', '--')
-                            intf = getattr(es, 'interface', 'Po1')
+                            intf = getattr(es, 'interface', '') or 'Po1'
                             domain_id = getattr(bi, 'id', 1)
-                            lines.append(f"domain-id           : {domain_id}")
-                            lines.append(f"local-interface     : {format_arista_intf(intf, short=True)}")
-                            lines.append(f"peer-address        : --")
-                            lines.append(f"peer-link           : {format_arista_intf(intf, short=True)}")
-                            lines.append(f"state               : Active")
+                            admin_st = getattr(es, 'admin_state', 'enable')
+                            oper_st = getattr(es, 'oper_state', 'down')
+                            mlag_state = "Active" if (admin_st == "enable" and oper_st == "up") else "Inactive"
+
+                            peer_addr = "--"
+                            lines = [
+                                "MLAG Configuration:",
+                                f"domain-id           : {domain_id}",
+                                f"local-interface     : {format_arista_intf(intf, short=True)}",
+                                f"peer-address        : {peer_addr}",
+                                f"peer-link           : {format_arista_intf(intf, short=True)}",
+                                f"state               : {mlag_state}"
+                            ]
                             break
         except Exception:
             pass

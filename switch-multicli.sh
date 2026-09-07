@@ -21,11 +21,44 @@ if [ -z "$TARGET_NOS" ]; then
     exit 1
 fi
 
-CLAB_DIR="/home/awhitaker/clab/srl-evpn-irb/clab-srl-evpn-irb/${TARGET_NODE}/config/cli"
+# Determine target directory or docker mode
+TARGET_CLI_DIR=""
+USE_DOCKER_CP=false
 
-if [ ! -d "$CLAB_DIR" ]; then
-    echo "Error: Target node directory does not exist: $CLAB_DIR"
-    exit 1
+# 1. Try resolving host mount path via docker inspect
+if command -v docker >/dev/null 2>&1; then
+    INSPECTED_DIR="$(docker inspect "$TARGET_NODE" --format '{{range .Mounts}}{{if eq .Destination "/etc/opt/srlinux"}}{{.Source}}/cli{{else if eq .Destination "/etc/opt/srlinux/cli"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true)"
+    if [ -n "$INSPECTED_DIR" ] && [ -d "$(dirname "$INSPECTED_DIR")" ]; then
+        TARGET_CLI_DIR="$INSPECTED_DIR"
+    fi
+fi
+
+# 2. Check CLAB_DIR environment variable if provided
+if [ -z "$TARGET_CLI_DIR" ] && [ -n "${CLAB_DIR:-}" ]; then
+    if [ -d "$CLAB_DIR/${TARGET_NODE}/config/cli" ]; then
+        TARGET_CLI_DIR="$CLAB_DIR/${TARGET_NODE}/config/cli"
+    elif [ -d "$CLAB_DIR" ]; then
+        TARGET_CLI_DIR="$CLAB_DIR"
+    fi
+fi
+
+# 3. Search for clab lab directories relative to current or home directory
+if [ -z "$TARGET_CLI_DIR" ]; then
+    MATCH="$(find . -maxdepth 4 -type d -path "*/${TARGET_NODE}/config/cli" 2>/dev/null | head -n 1 || true)"
+    if [ -n "$MATCH" ] && [ -d "$MATCH" ]; then
+        TARGET_CLI_DIR="$MATCH"
+    fi
+fi
+
+# 4. If directory not found on host, check if target container is running
+if [ -z "$TARGET_CLI_DIR" ]; then
+    if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -qw "$TARGET_NODE"; then
+        USE_DOCKER_CP=true
+    else
+        echo "Error: Could not locate configuration directory for '$TARGET_NODE' and container is not running."
+        echo "Please specify CLAB_DIR environment variable or run the containerlab topology."
+        exit 1
+    fi
 fi
 
 case "$TARGET_NOS" in
@@ -49,12 +82,21 @@ esac
 
 echo "==> Configuring node '$TARGET_NODE' with $NOS_NAME persona..."
 
-# Clean existing plugin subdirs in target node config/cli
-rm -rf "$CLAB_DIR"/plugins/* "$CLAB_DIR"/system "$CLAB_DIR"/routing "$CLAB_DIR"/interface "$CLAB_DIR"/ip "$CLAB_DIR"/mac "$CLAB_DIR"/eth_switch "$CLAB_DIR"/bgp "$CLAB_DIR"/README.md 2>/dev/null || true
-mkdir -p "$CLAB_DIR"/plugins
+if [ "$USE_DOCKER_CP" = true ]; then
+    # Clean in container
+    docker exec "$TARGET_NODE" bash -c 'rm -rf /etc/opt/srlinux/cli/* && mkdir -p /etc/opt/srlinux/cli/plugins'
+    # Copy files into container
+    docker cp "$SOURCE_DIR"/. "$TARGET_NODE":/etc/opt/srlinux/cli/
+    echo "==> Successfully installed $NOS_NAME to $TARGET_NODE via docker cp."
+else
+    # Clean existing plugin subdirs in target node config/cli
+    mkdir -p "$TARGET_CLI_DIR"/plugins
+    rm -rf "$TARGET_CLI_DIR"/plugins/* "$TARGET_CLI_DIR"/system "$TARGET_CLI_DIR"/routing "$TARGET_CLI_DIR"/interface "$TARGET_CLI_DIR"/ip "$TARGET_CLI_DIR"/mac "$TARGET_CLI_DIR"/eth_switch "$TARGET_CLI_DIR"/bgp "$TARGET_CLI_DIR"/README.md 2>/dev/null || true
+    mkdir -p "$TARGET_CLI_DIR"/plugins
 
-# Copy vendor suite
-cp -r "$SOURCE_DIR"/* "$CLAB_DIR"/
+    # Copy vendor suite
+    cp -r "$SOURCE_DIR"/* "$TARGET_CLI_DIR"/
+    echo "==> Successfully installed $NOS_NAME to $TARGET_NODE ($TARGET_CLI_DIR)."
+fi
 
-echo "==> Successfully installed $NOS_NAME to $TARGET_NODE ($CLAB_DIR)."
 echo "==> Test now with: docker exec -it $TARGET_NODE sr_cli"

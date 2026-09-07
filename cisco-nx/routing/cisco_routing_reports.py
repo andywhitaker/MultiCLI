@@ -304,6 +304,7 @@ class CiscoRoutingReports:
             for ti in data.tunnel_interface.items():
                 if hasattr(ti, 'vxlan_interface'):
                     for vxi in ti.vxlan_interface.items():
+                        vxi_name = f"{ti.name}.{vxi.index}"
                         bt = getattr(vxi, 'bridge_table', None)
                         if bt and hasattr(bt.get(), 'unicast_destinations'):
                             ud = bt.get().unicast_destinations.get()
@@ -311,11 +312,12 @@ class CiscoRoutingReports:
                                 for dest in ud.destination.items():
                                     vtep = getattr(dest, 'vtep', None)
                                     if vtep:
+                                        dest_oper = getattr(dest, 'oper_state', 'up').capitalize()
                                         rows.append({
                                             'intf': 'nve1',
                                             'peer': str(vtep),
-                                            'src': 'system0.0',
-                                            'state': 'Up',
+                                            'src': vxi_name,
+                                            'state': dest_oper if dest_oper in ('Up', 'Down') else 'Up',
                                             'learn': 'CP'
                                         })
         except Exception:
@@ -342,38 +344,64 @@ class CiscoRoutingReports:
         """Display Cisco NX-OS style 'show vpc'."""
         lines = []
         found = False
+        vpc_rows = []
+        domain_id = 1
+        peer_link_up = False
         try:
             path = build_path('/system/network-instance/protocols/evpn/ethernet-segments')
             data = state.server_data_store.get_data(path, recursive=True)
-            es_container = getattr(data.system.get().network_instance.get().protocols.get().evpn.get(), 'ethernet_segments', None)
-            if es_container and hasattr(es_container.get(), 'bgp_instance'):
-                for bi in es_container.get().bgp_instance.items():
-                    if hasattr(bi, 'ethernet_segment'):
-                        for es in bi.ethernet_segment.items():
-                            found = True
-                            intf = getattr(es, 'interface', 'Po1')
-                            domain_id = getattr(bi, 'id', 1)
-                            lines = [
-                                "Legend:",
-                                "                (*) - local vPC is down, forwarding via vPC peer-link",
-                                "",
-                                f"vPC domain id                     : {domain_id}",
-                                "Peer status                       : peer-link is up",
-                                "vPC keep-alive status             : Active",
-                                "Configuration status              : success",
-                                "Peer-link status                  : 1",
-                                "",
-                                "vPC status",
-                                "----------------------------------------------------------------------------",
-                                f"{'Id':<5} {'Port':<23} {'Status':<7} {'Att':<4} {'Consistency'}",
-                                "--    ----------------------  ------  ---  -----------",
-                                f"1     {format_cisco_intf(intf, short=True):<23} {'Up':<7} {'1':<4} {'Passed'}"
-                            ]
-                            break
+            sys_node = getattr(data, 'system', None)
+            if sys_node and hasattr(sys_node.get(), 'network_instance'):
+                sys_ni = sys_node.get().network_instance.get()
+                if hasattr(sys_ni, 'protocols'):
+                    evpn = getattr(sys_ni.protocols.get(), 'evpn', None)
+                    if evpn and hasattr(evpn.get(), 'ethernet_segments'):
+                        es_container = evpn.get().ethernet_segments.get()
+                        if hasattr(es_container, 'bgp_instance'):
+                            for bi in es_container.bgp_instance.items():
+                                domain_id = getattr(bi, 'id', 1)
+                                if hasattr(bi, 'ethernet_segment'):
+                                    for es_idx, es in enumerate(bi.ethernet_segment.items(), 1):
+                                        found = True
+                                        intf = getattr(es, 'interface', f'Po{es_idx}')
+                                        admin_st = getattr(es, 'admin_state', 'enable')
+                                        oper_st = getattr(es, 'oper_state', 'down').lower()
+                                        is_up = (admin_st == 'enable' and oper_st == 'up')
+                                        if is_up:
+                                            peer_link_up = True
+                                        vpc_rows.append({
+                                            'id': str(es_idx),
+                                            'port': format_cisco_intf(intf, short=True),
+                                            'status': 'Up' if is_up else 'Down',
+                                            'att': '1' if is_up else '0',
+                                            'consistency': 'Passed' if is_up else 'Failed'
+                                        })
         except Exception:
             pass
 
-        if not found:
+        if found:
+            peer_st_str = "peer-link is up" if peer_link_up else "peer-link is down"
+            ka_st_str = "Active" if peer_link_up else "Inactive"
+            cfg_st_str = "success" if peer_link_up else "failed"
+            pl_num = "1" if peer_link_up else "0"
+            lines = [
+                "Legend:",
+                "                (*) - local vPC is down, forwarding via vPC peer-link",
+                "",
+                f"vPC domain id                     : {domain_id}",
+                f"Peer status                       : {peer_st_str}",
+                f"vPC keep-alive status             : {ka_st_str}",
+                f"Configuration status              : {cfg_st_str}",
+                f"Peer-link status                  : {pl_num}",
+                "",
+                "vPC status",
+                "----------------------------------------------------------------------------",
+                f"{'Id':<5} {'Port':<23} {'Status':<7} {'Att':<4} {'Consistency'}",
+                "--    ----------------------  ------  ---  -----------",
+            ]
+            for r in vpc_rows:
+                lines.append(f"{r['id']:<5} {r['port']:<23} {r['status']:<7} {r['att']:<4} {r['consistency']}")
+        else:
             lines = [
                 "vPC domain id                     : --",
                 "Peer status                       : peer-link is down",

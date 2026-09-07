@@ -1,17 +1,52 @@
 # Custom CLI Plugins for Juniper JUNOS
 
-The following CLI plugins are available in this repo:
+MultiCLI allows users to execute familiar Juniper JUNOS commands on Nokia SR Linux switches with matching output and dynamic state learning.
 
-| Command | Contributor |
+## Supported Commands
+
+### System & Hardware
+| Command | Description |
 |---|---|
-| `show interfaces` | [hendriksthomas](https://github.com/hendriksthomas) |
-| `show interfaces terse` | [hendriksthomas](https://github.com/hendriksthomas) |
-| `show interfaces brief` | [hendriksthomas](https://github.com/hendriksthomas) |
-| `show ethernet-switching table` | [michelredondo](https://github.com/michelredondo) |
+| `show version` | JUNOS software version, model, and OS release info |
+| `show system uptime` | Current time, boot time, uptime, and last commit info |
+| `show system processes [summary\|brief\|extensive]` | CPU, memory, swap, and top active system processes |
+| `show chassis hardware` | Chassis model, serial number, and hardware components |
+
+### Interfaces & Switching
+| Command | Description |
+|---|---|
+| `show interfaces` | Comprehensive interface statistics and operational parameters |
+| `show interfaces brief` | Physical link, flags, and logical interface IP addresses |
+| `show interfaces terse` | Compact table of interfaces, admin/link status, and addresses |
+| `show ethernet-switching table` | MAC table with VLAN, MAC, age, and logical interface |
+| `show ethernet-switching table instance <instance_name>` | Filter MAC table by routing/bridge instance |
+| `show ethernet-switching table vlan <vlan_id>` | Filter MAC table by VLAN |
+| `show ethernet-switching table interface <name>` | Filter MAC table by interface |
+| `show vlans` | Active VLANs, routing instances, 802.1Q tags, and member ports |
+| `show lacp interfaces` | LACP aggregated interfaces, actor/partner states, and mux flags |
+
+### Routing & Protocols
+| Command | Description |
+|---|---|
+| `show route summary` | Route summary counts (Direct, Local, BGP, Static, OSPF, IS-IS) |
+| `show bgp summary` | BGP groups, peer states, packet counters, and route tables |
+| `show ospf neighbor` | OSPF neighbor adjacencies, interface, and router ID |
+| `show isis adjacency` | IS-IS adjacency state, level, and hold times |
+| `show lldp neighbors` | LLDP neighbors, chassis ID, and system names |
+| `show arp` / `show arp no-resolve` | ARP cache resolution entries |
 
 ## Testing
 
-Deploy the EVPN lab. Login to any leaf or spine node using `juser/juser` and try any of the above commands.
+Deploy the containerlab topology and log in to a switch configured with the Juniper JUNOS persona (or use `juser/juser`):
+
+```bash
+docker exec -it leaf3 sr_cli
+```
+
+Or switch any node on-the-fly using the helper script:
+```bash
+./switch-multicli.sh juniper leaf1
+```
 
 > [!NOTE]
 > Some of these plugin scripts require other python scripts that are also copied into the `eth_switch` or `route` folder.

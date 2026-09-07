@@ -10,8 +10,9 @@ import sys
 import time
 
 TEST_SUITES = {
-    "Arista EOS (leaf1)": {
-        "node": "leaf1",
+    "Arista EOS": {
+        "arg_key": "arista_node",
+        "default_node": "leaf1",
         "commands": [
             "show version",
             "show hostname",
@@ -45,10 +46,15 @@ TEST_SUITES = {
             "show mlag",
             "show ip bgp summary",
             "show bgp evpn summary",
+        ],
+        "negative_assertions": [
+            ("show mlag", "state: Active", "show mlag should not output hardcoded 'state: Active' when no MLAG is configured"),
+            ("show port-channel summary", "LACP(a)", "show port-channel summary should not hardcode LACP(a) when no LAG is configured"),
         ]
     },
-    "Cisco NX-OS (leaf2)": {
-        "node": "leaf2",
+    "Cisco NX-OS": {
+        "arg_key": "cisco_node",
+        "default_node": "leaf2",
         "commands": [
             "show version",
             "show hostname",
@@ -79,6 +85,9 @@ TEST_SUITES = {
             "show ip route vrf default",
             "show ip bgp summary",
             "show mac address-table",
+            "show mac address-table vlan 1",
+            "show mac address-table interface ethernet-1/1",
+            "show mac address-table vni 1",
             "show vrf",
             "show vlan",
             "show bfd neighbors",
@@ -87,10 +96,15 @@ TEST_SUITES = {
             "show nve vni",
             "show nve peers",
             "show vpc",
+        ],
+        "negative_assertions": [
+            ("show vpc", "peer-link is up", "show vpc should not output hardcoded 'peer-link is up' when no VPC/ES is configured"),
+            ("show nve peers", "state: Up", "show nve peers should not output hardcoded 'state: Up' when no NVE peer is present"),
         ]
     },
-    "Juniper JUNOS (leaf3)": {
-        "node": "leaf3",
+    "Juniper JUNOS": {
+        "arg_key": "juniper_node",
+        "default_node": "leaf3",
         "commands": [
             "show version",
             "show system uptime",
@@ -108,10 +122,16 @@ TEST_SUITES = {
             "show vlans",
             "show lacp interfaces",
             "show ethernet-switching table",
+            "show ethernet-switching table vlan 1",
+            "show ethernet-switching table instance default",
+            "show ethernet-switching table interface ethernet-1/1",
             "show route summary",
             "show bgp summary",
             "show ospf neighbor",
             "show isis adjacency",
+        ],
+        "negative_assertions": [
+            ("show system uptime", "Time Source: NTP CLOCK", "show system uptime should dynamically verify NTP state rather than hardcoding NTP CLOCK"),
         ]
     }
 }
@@ -132,7 +152,7 @@ def run_command(node, cmd):
     dt = time.time() - t0
     return res.returncode, res.stdout, res.stderr, dt
 
-def validate():
+def validate(args):
     total_passed = 0
     total_failed = 0
     failures = []
@@ -142,8 +162,9 @@ def validate():
     print("=" * 80)
 
     for suite_name, suite in TEST_SUITES.items():
-        node = suite["node"]
+        node = getattr(args, suite["arg_key"], suite["default_node"])
         commands = suite["commands"]
+        neg_assertions = dict(((c, p), msg) for c, p, msg in suite.get("negative_assertions", []))
         print(f"\n--- Running {suite_name} on container '{node}' ({len(commands)} commands) ---")
 
         for idx, cmd in enumerate(commands, 1):
@@ -161,6 +182,11 @@ def validate():
             if not stdout.strip() and not stderr.strip():
                 errors.append("Output is completely empty")
 
+            # Negative assertions: ensure no hardcoded mock data is present
+            for (neg_cmd, bad_pattern), failure_msg in neg_assertions.items():
+                if cmd == neg_cmd and bad_pattern in stdout:
+                    errors.append(f"Assertion failed: {failure_msg} (found '{bad_pattern}')")
+
             if errors:
                 total_failed += 1
                 status = "FAIL"
@@ -172,11 +198,11 @@ def validate():
                     "stdout": stdout,
                     "stderr": stderr
                 })
-                print(f"  [{idx:2d}/{len(commands):2d}] {cmd:<35} -> {status} ({dt:.2f}s) - {'; '.join(errors)}")
+                print(f"  [{idx:2d}/{len(commands):2d}] {cmd:<44} -> {status} ({dt:.2f}s) - {'; '.join(errors)}")
             else:
                 total_passed += 1
                 status = "PASS"
-                print(f"  [{idx:2d}/{len(commands):2d}] {cmd:<35} -> {status} ({dt:.2f}s)")
+                print(f"  [{idx:2d}/{len(commands):2d}] {cmd:<44} -> {status} ({dt:.2f}s)")
 
     print("\n" + "=" * 80)
     print(f"Test Summary: Total={total_passed + total_failed} | Passed={total_passed} | Failed={total_failed}")
@@ -193,10 +219,18 @@ def validate():
                 print(f"STDERR:\n{f['stderr']}")
             if f['stdout']:
                 print(f"STDOUT:\n{f['stdout']}")
-        sys.exit(1)
+        return False
     else:
         print("\nALL COMMANDS PASSED VALIDATION WITHOUT ERRORS!")
-        sys.exit(0)
+        return True
 
 if __name__ == "__main__":
-    validate()
+    import argparse
+    parser = argparse.ArgumentParser(description="MultiCLI Automated Test Validation Suite")
+    parser.add_argument("--arista-node", default="leaf1", help="Target node running Arista EOS persona (default: leaf1)")
+    parser.add_argument("--cisco-node", default="leaf2", help="Target node running Cisco NX-OS persona (default: leaf2)")
+    parser.add_argument("--juniper-node", default="leaf3", help="Target node running Juniper JUNOS persona (default: leaf3)")
+    cli_args = parser.parse_args()
+
+    success = validate(cli_args)
+    sys.exit(0 if success else 1)

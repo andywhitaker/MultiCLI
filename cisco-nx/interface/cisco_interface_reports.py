@@ -130,19 +130,56 @@ class CiscoInterfaceReports:
                 elif name.startswith('ethernet-'):
                     eth_name = format_cisco_intf(name, short=True)
                     speed_val = format_cisco_speed(speed_str)
-                    if status == "up":
-                        speed_display = f"{speed_val}(D)"
-                    else:
-                        speed_display = speed_val
+                    speed_display = f"{speed_val}(D)" if status == "up" else speed_val
+
+                    # Dynamic VLAN, mode, and LAG member detection
+                    vlan_str = "1"
+                    mode_str = "routed"
+                    portch_str = "--"
+
+                    if hasattr(intf, 'ethernet') and intf.ethernet.exists():
+                        eth_obj = intf.ethernet.get()
+                        agg_id = getattr(eth_obj, 'aggregate_id', None)
+                        if agg_id:
+                            portch_str = str(agg_id).replace('lag', '')
+
+                    if hasattr(intf, 'subinterface'):
+                        bridged_vlans = []
+                        has_routed = False
+                        for subif in intf.subinterface.items():
+                            stype = getattr(subif, 'type', '')
+                            if stype == 'routed':
+                                has_routed = True
+                            elif stype == 'bridged':
+                                tag = None
+                                if hasattr(subif, 'vlan'):
+                                    try:
+                                        v_obj = subif.vlan.get() if hasattr(subif.vlan, 'get') else subif.vlan
+                                        encap = getattr(v_obj, 'encap', None)
+                                        if encap:
+                                            st = getattr(encap, 'single_tagged', None)
+                                            if st and hasattr(st, 'vlan_id'):
+                                                tag = str(st.vlan_id)
+                                    except Exception:
+                                        pass
+                                bridged_vlans.append(tag if tag else "1")
+
+                        if bridged_vlans:
+                            mode_str = "trunk" if len(bridged_vlans) > 1 else "access"
+                            vlan_str = "trunk" if len(bridged_vlans) > 1 else bridged_vlans[0]
+                        elif has_routed:
+                            mode_str = "routed"
+                            vlan_str = "routed" if status == "up" else "--"
+
                     eth_rows.append({
                         'interface': eth_name,
-                        'vlan': "1",
+                        'vlan': vlan_str,
                         'type': "eth",
-                        'mode': "routed",
+                        'mode': mode_str,
                         'status': status,
                         'reason': reason,
                         'speed': speed_display,
-                        'portch': "--"
+                        'portch': portch_str
                     })
         except Exception:
             pass
@@ -502,6 +539,17 @@ class CiscoInterfaceReports:
             "-----------------------------------------------------------------------------"
         ]
         rows = []
+        intf_to_vrf = {}
+        try:
+            ni_p = build_path('/network-instance[name=*]/interface[name=*]')
+            ni_d = state.server_data_store.get_data(ni_p, recursive=False)
+            for ni in ni_d.network_instance.items():
+                if hasattr(ni, 'interface'):
+                    for i in ni.interface.items():
+                        intf_to_vrf[i.name] = ni.name
+        except Exception:
+            pass
+
         path = build_path('/interface[name=*]/subinterface[index=*]/ipv6/address[ip-prefix=*]')
         try:
             data = state.server_data_store.get_data(path, recursive=True)
@@ -514,13 +562,15 @@ class CiscoInterfaceReports:
 
                 if hasattr(intf, 'subinterface'):
                     for sub in intf.subinterface.items():
+                        full_name = f"{name}.{sub.index}"
                         sub_disp = f"{disp_port}.{sub.index}" if sub.index != 0 else disp_port
+                        sub_vrf = intf_to_vrf.get(full_name, intf_to_vrf.get(name, "default"))
                         if hasattr(sub, 'ipv6') and sub.ipv6.exists():
                             for a in sub.ipv6.get().address.items():
                                 prefix = getattr(a, 'ip_prefix', '--')
                                 rows.append({
                                     'port': sub_disp,
-                                    'vrf': "default",
+                                    'vrf': sub_vrf,
                                     'ip': str(prefix),
                                     'status': status
                                 })

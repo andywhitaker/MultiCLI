@@ -14,6 +14,7 @@ import os
 potential_paths = [
     '/etc/opt/srlinux/cli',
     os.path.expanduser('~/cli'),
+    '/home/juser/cli',
     '/home/auser/cli',
     '/home/admin/cli',
     '/home/srlinux/cli',
@@ -134,11 +135,25 @@ class Plugin(CliPlugin):
             callback=self._show_ethernet_switching_table,
             schema=EthernetSwitchingReport().get_schema_instance()
         )
-        self._add_or_override(
-            eth_switch_table,
+        eth_switch_table.add_command(
             Syntax('instance', help='Display information for a specified network-instance')
             .add_unnamed_argument('name', suggestions=KeyCompleter('/network-instance[name=*]')),
             callback=self._show_ethernet_switching_table,
+            update_location=False,
+            schema=EthernetSwitchingReport().get_schema_instance()
+        )
+        eth_switch_table.add_command(
+            Syntax('vlan', help='Display MAC address learned on a specified VLAN')
+            .add_unnamed_argument('value', suggestions=MultipleKeyCompleters(keycompleters=[KeyCompleter(path="/interface[name=*]/subinterface[index=*]/vlan/encap/single-tagged-range/low-vlan-id[range-low-vlan-id=*]"), KeyCompleter(path="/interface[name=*]/subinterface[index=*]/vlan/encap/single-tagged/vlan-id:")])),
+            callback=self._show_ethernet_switching_table,
+            update_location=False,
+            schema=EthernetSwitchingReport().get_schema_instance()
+        )
+        eth_switch_table.add_command(
+            Syntax('interface', help='Display MAC table for a specified interface')
+            .add_unnamed_argument('name', suggestions=MultipleKeyCompleters(keycompleters=[KeyCompleter(path="/interface[name=*]"), KeyCompleter(path="/interface[name=*]/subinterface[index=*]/name:")])),
+            callback=self._show_ethernet_switching_table,
+            update_location=False,
             schema=EthernetSwitchingReport().get_schema_instance()
         )
 

@@ -5,7 +5,7 @@
 ###########################################################################
 
 import srlinux.schema.schema_syntax_builder
-from srlinux.mgmt.cli import CliPlugin, KeyCompleter, RequiredPlugin
+from srlinux.mgmt.cli import CliPlugin, KeyCompleter, RequiredPlugin, MultipleKeyCompleters
 from srlinux.syntax import Syntax
 from srlinux.location import build_path
 import sys
@@ -14,6 +14,7 @@ import os
 potential_paths = [
     '/etc/opt/srlinux/cli',
     os.path.expanduser('~/cli'),
+    '/home/cnxuser/cli',
     '/home/auser/cli',
     '/home/admin/cli',
     '/home/srlinux/cli',
@@ -165,6 +166,27 @@ class Plugin(CliPlugin):
         mac_address_table.add_command(
             Syntax('instance', help='Display information for a specified network-instance')
             .add_unnamed_argument('name', suggestions=KeyCompleter('/network-instance[name=*]')),
+            callback=self._print_mac_address_table,
+            update_location=False,
+            schema=MacAddressTableReport().get_schema_instance()
+        )
+        mac_address_table.add_command(
+            Syntax('vlan', help='Display MAC address learned on a specified VLAN')
+            .add_unnamed_argument('value', suggestions=MultipleKeyCompleters(keycompleters=[KeyCompleter(path="/interface[name=*]/subinterface[index=*]/vlan/encap/single-tagged-range/low-vlan-id[range-low-vlan-id=*]"), KeyCompleter(path="/interface[name=*]/subinterface[index=*]/vlan/encap/single-tagged/vlan-id:")])),
+            callback=self._print_mac_address_table,
+            update_location=False,
+            schema=MacAddressTableReport().get_schema_instance()
+        )
+        mac_address_table.add_command(
+            Syntax('interface', help='Display MAC table for a specified interface')
+            .add_unnamed_argument('name', suggestions=MultipleKeyCompleters(keycompleters=[KeyCompleter(path="/interface[name=*]"), KeyCompleter(path="/interface[name=*]/subinterface[index=*]/name:")])),
+            callback=self._print_mac_address_table,
+            update_location=False,
+            schema=MacAddressTableReport().get_schema_instance()
+        )
+        mac_address_table.add_command(
+            Syntax('vni', help='Display MAC table for a specified vni')
+            .add_unnamed_argument('value', suggestions=KeyCompleter(path="/tunnel-interface[name=*]/vxlan-interface[index=*]/ingress/vni:")),
             callback=self._print_mac_address_table,
             update_location=False,
             schema=MacAddressTableReport().get_schema_instance()

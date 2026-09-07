@@ -6,6 +6,7 @@
 ###########################################################################
 
 import datetime
+import platform
 from srlinux.location import build_path
 
 def format_mac_cisco_arista(mac_str):
@@ -107,7 +108,7 @@ class AristaSystemReports:
             f"System MAC address:  {hw_mac}",
             f"",
             f"Software image version: {sw_version}",
-            f"Architecture:           x86_64",
+            f"Architecture:           {platform.machine() or 'x86_64'}",
             f"Internal build version: {sw_version}",
             f"Internal build ID:      {sw_version}",
             f"",
@@ -167,7 +168,7 @@ class AristaSystemReports:
 
     def show_inventory(self, state, output):
         """Display Arista EOS style 'show inventory'."""
-        chassis_type = "7220 IXR"
+        chassis_type = "Nokia Chassis"
         description = "Nokia SR Linux System"
         serial_number = ""
         hw_version = "-"
@@ -421,6 +422,7 @@ class AristaSystemReports:
             pass
 
         mem_total, mem_free, mem_avail, buffers, cached = "0", "0", "0", "0", "0"
+        swap_total, swap_free = "0", "0"
         try:
             with open('/proc/meminfo') as f:
                 for line in f:
@@ -434,11 +436,18 @@ class AristaSystemReports:
                         buffers = line.split()[1]
                     elif line.startswith('Cached:'):
                         cached = line.split()[1]
+                    elif line.startswith('SwapTotal:'):
+                        swap_total = line.split()[1]
+                    elif line.startswith('SwapFree:'):
+                        swap_free = line.split()[1]
         except Exception:
             pass
 
         used_kb = int(mem_total) - int(mem_free) if mem_total.isdigit() and mem_free.isdigit() else 0
         buff_cache = int(buffers) + int(cached) if buffers.isdigit() and cached.isdigit() else 0
+        swap_tot_kb = int(swap_total) if swap_total.isdigit() else 0
+        swap_free_kb = int(swap_free) if swap_free.isdigit() else 0
+        swap_used_kb = max(0, swap_tot_kb - swap_free_kb)
 
         # Read task info and ps
         ps_rows = []
@@ -480,11 +489,21 @@ class AristaSystemReports:
         except Exception:
             pass
 
-        lines.append(f"top - {now_time} up {up_str},  1 user,  load average: {load1}, {load5}, {load15}")
+        # Check logged in users count
+        num_users = 1
+        try:
+            who_res = subprocess.run(["who"], stdout=subprocess.PIPE, text=True)
+            u_count = len(who_res.stdout.strip().splitlines())
+            if u_count > 0:
+                num_users = u_count
+        except Exception:
+            pass
+
+        lines.append(f"top - {now_time} up {up_str},  {num_users} user{'s' if num_users != 1 else ''},  load average: {load1}, {load5}, {load15}")
         lines.append(f"Tasks: {total_tasks} total,   {running} running, {sleeping} sleeping,   {stopped} stopped,   {zombie} zombie")
         lines.append(cpu_line)
         lines.append(f"KiB Mem : {mem_total} total, {mem_free} free, {used_kb} used,  {buff_cache} buff/cache")
-        lines.append(f"KiB Swap:         0 total,        0 free,        0 used. {mem_avail} avail Mem")
+        lines.append(f"KiB Swap: {swap_tot_kb:>9} total, {swap_free_kb:>8} free, {swap_used_kb:>8} used. {mem_avail} avail Mem")
         lines.append("")
         lines.append(f"{'PID':>5} {'USER':<9} {'PR':<4} {'NI':<4} {'VIRT':>8} {'RES':>7} {'SHR':>6} {'S':<2} {'%CPU':>5} {'%MEM':>5} {'TIME+':>8} {'COMMAND'}")
 

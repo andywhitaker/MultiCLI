@@ -112,6 +112,33 @@ sudo clab dep -t srl-evpn-mh.clab.yml
 
 All non-MPLS commands are tested on Nokia 7220 IXR-D2L on SR Linux release 25.3.1.
 
+## Switching Personas Dynamically
+
+MultiCLI includes the `switch-multicli.sh` utility to hot-swap NOS personas on any running lab node:
+
+```bash
+# Switch leaf1 to Arista EOS
+./switch-multicli.sh arista leaf1
+
+# Switch leaf2 to Cisco NX-OS
+./switch-multicli.sh cisco leaf2
+
+# Switch leaf3 to Juniper JUNOS
+./switch-multicli.sh juniper leaf3
+```
+
+## Automated Validation Suite
+
+An automated test harness (`tests/validate_multicli.py`) runs the entire command suite against running switches and verifies that command execution is error-free, non-empty, and free of hardcoded mock data:
+
+```bash
+# Run all tests against default lab nodes (leaf1=Arista, leaf2=Cisco, leaf3=Juniper)
+python3 tests/validate_multicli.py
+
+# Or specify custom nodes:
+python3 tests/validate_multicli.py --arista-node leaf1 --cisco-node leaf2 --juniper-node leaf3
+```
+
 ## This is great, but i want more commands supported for my network
 
 We are inviting contributions from the open source community towards this project.
