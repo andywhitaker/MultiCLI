@@ -28,6 +28,7 @@ MultiCLI allows users to execute familiar Juniper JUNOS commands on Nokia SR Lin
 ### Routing & Protocols
 | Command | Description |
 |---|---|
+| `show route` | Full IPv4 routing table with destinations, routes, and next-hops |
 | `show route summary` | Route summary counts (Direct, Local, BGP, Static, OSPF, IS-IS) |
 | `show bgp summary` | BGP groups, peer states, packet counters, and route tables |
 | `show ospf neighbor` | OSPF neighbor adjacencies, interface, and router ID |

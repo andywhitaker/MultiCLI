@@ -89,8 +89,7 @@ class InterfaceDetails(object):
             else:
                 return int(number)
 
-        except Exception as e:
-            print(f"Error converting speed '{speed}' to bps: {e}")
+        except Exception:
             return None
 
 
@@ -147,8 +146,7 @@ class InterfaceDetails(object):
 
                 bandwidth = int(port_speed.rstrip("G")) * 1_000_000
 
-            except Exception as e:
-                print(f"Error calculating bandwidth from port speed: {e}")
+            except Exception:
                 bandwidth = None
             try:
                 duplex = intf.ethernet.get().duplex_mode
@@ -186,10 +184,10 @@ class InterfaceDetails(object):
             #deferred = intf.statistics.get().out_deferred_packets
             output_discards = intf.statistics.get().out_discarded_packets
             pause_output = getattr(getattr(getattr(intf.ethernet.get(), 'statistics', None), 'get', lambda: None)(), 'out_mac_pause_frames', None) or 0
-            input_packets_rate = intf.traffic_rate.get().in_bps
-            output_packets_rate = intf.traffic_rate.get().out_bps
-            input_utilization = self.calculate_utilization(input_packets_rate, port_speed)
-            output_utilization = self.calculate_utilization(output_packets_rate, port_speed)
+            input_rate = intf.traffic_rate.get().in_bps
+            output_rate = intf.traffic_rate.get().out_bps
+            input_utilization = self.calculate_utilization(input_rate, port_speed)
+            output_utilization = self.calculate_utilization(output_rate, port_speed)
 
 
             template_string = """
@@ -201,8 +199,8 @@ class InterfaceDetails(object):
   Loopback Mode : {{ loopback_mode }}
   {{ link_changes }} link status changes since last clear
   Last clearing of "show interface" counters {{ last_clearing }}
-  1 second input rate {{ input_rate }} bps ({{ input_utilization }}% with framing overhead), {{ input_packets_rate }} packets/sec
-  1 second output rate {{ output_rate }} bps ({{ output_utilization }}% with framing overhead), {{ output_packets_rate }} packets/sec
+  1 second input rate {{ input_rate }} bps ({{ input_utilization }}% with framing overhead)
+  1 second output rate {{ output_rate }} bps ({{ output_utilization }}% with framing overhead)
     {{ input_packets }} packets input, {{ input_bytes }} bytes
     Received {{ received_broadcasts }} broadcasts, {{ received_multicast }} multicast
     {{ runts }} runts, {{ giants }} giants
@@ -233,12 +231,10 @@ class InterfaceDetails(object):
             "loopback_mode": loopback_mode,
             "link_changes": link_changes,
             "last_clearing": uptime,
-            "input_rate": input_packets_rate,
+            "input_rate": input_rate,
             "input_utilization": input_utilization,
-            "input_packets_rate": input_packets_rate,
-            "output_rate": output_packets_rate,
+            "output_rate": output_rate,
             "output_utilization": output_utilization,
-            "output_packets_rate": output_packets_rate,
             "input_packets": input_packets,
             "input_bytes": input_bytes,
             "received_broadcasts": received_broadcasts,

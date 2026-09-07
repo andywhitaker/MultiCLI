@@ -51,6 +51,7 @@ TEST_SUITES = {
             "show bgp evpn summary",
             "show interface status",
             "show interfaces status",
+            "show eos interface ethernet-1/1",
         ],
         "negative_assertions": [
             ("show mlag", "state: Active", "show mlag should not output hardcoded 'state: Active' when no MLAG is configured"),
@@ -65,6 +66,7 @@ TEST_SUITES = {
             ("show vlan", "Vlan1", "show vlan should not convert IRB interface to Vlan1"),
             ("show mac address-table", "Vlan--", "show mac address-table should not output 'Vlan--'"),
             ("show mac address-table", "Vlan1", "show mac address-table should not convert IRB interface to Vlan1"),
+            ("show eos interface ethernet-1/1", "packets/sec", "show eos interface detail should not output unsupported packets/sec metric"),
         ],
         "positive_assertions": [
             ("show ip route", "Gateway of last resort", "show ip route must contain Gateway of last resort header"),
@@ -75,6 +77,7 @@ TEST_SUITES = {
             ("show vlan", "irb0.1", "show vlan must preserve irb0.1 interface name"),
             ("show mac address-table", "1       0000.5e00.0101", "show mac address-table must dynamically resolve VLAN 1 for IRB MAC"),
             ("show mac address-table", "irb0.1", "show mac address-table must format IRB port as irb0.1"),
+            ("show eos interface ethernet-1/1", "with framing overhead", "show eos interface detail should output input/output rate with framing overhead"),
         ]
     },
     "Cisco NX-OS": {
