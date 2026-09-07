@@ -118,7 +118,7 @@ class CiscoRoutingReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show network-instance")
+        output.print_line("Try SR Linux command: show network-instance summary")
 
     def show_ip_arp(self, state, output):
         """Display Cisco NX-OS style 'show ip arp'."""
@@ -414,7 +414,7 @@ class CiscoRoutingReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show tunnel-interface")
+        output.print_line("Try SR Linux command: show tunnel-interface vxlan-interface brief")
 
     def show_nve_peers(self, state, output):
         """Display Cisco NX-OS style 'show nve peers'."""
@@ -463,7 +463,7 @@ class CiscoRoutingReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show tunnel-interface vxlan-interface bridge-table")
+        output.print_line("Try SR Linux command: show tunnel-interface vxlan-interface bridge-table unicast-destinations destination")
 
     def show_vpc(self, state, output):
         """Display Cisco NX-OS style 'show vpc'."""

@@ -201,7 +201,7 @@ class JunosRoutingReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show network-instance")
+        output.print_line("Try SR Linux command: show network-instance summary")
 
     def show_lacp_interfaces(self, state, output):
         """Display Juniper JUNOS style 'show lacp interfaces'."""
@@ -459,7 +459,7 @@ class JunosRoutingReports:
 
         output.print_line("\n".join(lines).rstrip())
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line(f"Try SR Linux command: show network-instance {network_instance} route-table")
+        output.print_line(f"Try SR Linux command: show network-instance {network_instance} ipv4 route")
 
     def show_route_summary(self, state, output):
         """Display Juniper JUNOS style 'show route summary'."""
@@ -468,44 +468,29 @@ class JunosRoutingReports:
 
         # Query BGP AS and router ID
         try:
-            path_ni = build_path('/network-instance[name=default]')
-            data_ni = state.server_data_store.get_data(path_ni, recursive=False)
-            for ni in data_ni.network_instance.items():
-                if hasattr(ni, 'router_id') and ni.router_id:
-                    router_id = str(ni.router_id)
-        except Exception:
-            pass
-
-        try:
             path_bgp = build_path('/network-instance[name=default]/protocols/bgp')
-            data_bgp = state.server_data_store.get_data(path_bgp, recursive=False)
-            for ni in data_bgp.network_instance.items():
-                if hasattr(ni, 'protocols') and ni.protocols.exists():
-                    bgp = getattr(ni.protocols.get(), 'bgp', None)
-                    if bgp:
-                        b_node = bgp.get() if hasattr(bgp, 'get') else bgp
-                        if hasattr(b_node, 'autonomous_system') and b_node.autonomous_system:
-                            asn = str(b_node.autonomous_system)
+            bgp_data = state.server_data_store.get_data(path_bgp, recursive=True)
+            bgp = bgp_data.network_instance.get().protocols.get().bgp.get()
+            asn = getattr(bgp, 'autonomous_system', '--')
+            router_id = getattr(bgp, 'router_id', '--')
         except Exception:
             pass
 
-        # Query route table
+        # Query route counts
         direct_count = 0
         local_count = 0
         bgp_count = 0
         static_count = 0
         ospf_count = 0
         isis_count = 0
-        total_routes = 0
 
-        path_routes = build_path('/network-instance[name=default]/route-table/ipv4-unicast/route[ipv4-prefix=*]')
         try:
-            data_routes = state.server_data_store.get_data(path_routes, recursive=False)
-            for r in data_routes.get_descendants('/network-instance/route-table/ipv4-unicast/route'):
-                total_routes += 1
+            path_rt = build_path('/network-instance[name=default]/route-table/ipv4-unicast/route[ipv4-prefix=*]')
+            rt_data = state.server_data_store.get_data(path_rt, recursive=True)
+            for r in rt_data.network_instance.get().route_table.get().ipv4_unicast.get().route.items():
                 rtype = str(getattr(r, 'route_type', '')).lower()
                 rowner = str(getattr(r, 'route_owner', '')).lower()
-                if 'connected' in rowner or 'direct' in rowner or rtype == 'local':
+                if 'connected' in rowner or (rtype == 'local' and 'host' not in rtype):
                     direct_count += 1
                 elif 'host' in rtype or 'local' in rowner:
                     local_count += 1
@@ -517,14 +502,15 @@ class JunosRoutingReports:
                     ospf_count += 1
                 elif 'isis' in rtype or 'isis' in rowner:
                     isis_count += 1
-                else:
-                    direct_count += 1
         except Exception:
             pass
 
+        total_routes = direct_count + local_count + bgp_count + static_count + ospf_count + isis_count
+
         lines = [
             f"Autonomous system number: {asn}",
-            f"Router ID: {router_id}\n",
+            f"Router ID: {router_id}",
+            "",
             f"inet.0: {total_routes} destinations, {total_routes} routes ({total_routes} active, 0 holddown, 0 hidden)",
             f"{'Direct:':>20} {direct_count:>10} routes, {direct_count:>10} active",
             f"{'Local:':>20} {local_count:>10} routes, {local_count:>10} active",
@@ -536,7 +522,7 @@ class JunosRoutingReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show network-instance default route-table")
+        output.print_line("Try SR Linux command: show network-instance default ipv4 route summary")
 
     def show_bgp_summary(self, state, output):
         """Display Juniper JUNOS style 'show bgp summary'."""

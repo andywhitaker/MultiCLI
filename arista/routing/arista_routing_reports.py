@@ -203,7 +203,7 @@ class AristaRoutingReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line(f"Try SR Linux command: show network-instance {vrf} route-table")
+        output.print_line(f"Try SR Linux command: show network-instance {vrf} ipv4 route")
 
     def show_vrf(self, state, output):
         """Display Arista EOS style 'show vrf'."""
@@ -358,7 +358,7 @@ class AristaRoutingReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show network-instance")
+        output.print_line("Try SR Linux command: show network-instance summary")
 
     def show_mac_address_table(self, state, output):
         """Display Arista EOS style 'show mac address-table'."""

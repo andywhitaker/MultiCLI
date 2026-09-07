@@ -364,12 +364,12 @@ class Plugin(CliPlugin):
         if state.is_intermediate_command:
             return
         IpRouteReport()._show_routes(state, output, network_instance='default')
-        output.print_line('\nTry SR Linux command: show network-instance default route-table')
+        output.print_line('\nTry SR Linux command: show network-instance default ipv4 route')
 
     def _print_ip_route_vrf(self, state, arguments, output, **_kwargs):
         vrf_name = arguments.get('vrf_name') or 'default'
         IpRouteReport()._show_routes(state, output, network_instance=vrf_name)
-        output.print_line(f'\nTry SR Linux command: show network-instance {vrf_name} route-table')
+        output.print_line(f'\nTry SR Linux command: show network-instance {vrf_name} ipv4 route')
 
     def _print_ip_interface_brief(self, state, output, **_kwargs):
         IpInterfaceReport().show_ip_interface_brief(state, output, vrf='default')
