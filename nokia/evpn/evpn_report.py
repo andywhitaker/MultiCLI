@@ -131,6 +131,7 @@ class EvpnDestinationReport(object):
 
     def _fetch_state(self, state, arguments):
         chassis_type_path = build_path("/platform/chassis/type")
+        self._chassis_type = ""
 
         try:
             self._chassis_type = (
@@ -139,8 +140,8 @@ class EvpnDestinationReport(object):
                 .chassis.get()
                 .type
             )
-        except ServerError as e:
-            print(f"Could not retrieve chassis type, message: '{e}'")
+        except ServerError:
+            self._chassis_type = ""
 
         if self._chassis_type.startswith("7730"):
             self._fetch_state_mpls(state, arguments)
@@ -189,8 +190,7 @@ class EvpnDestinationReport(object):
             self._route_table_data = state.server.get_data_store(DataStore.State).get_data(
                 route_table_path, recursive=True
             )
-        except ServerError as e:
-            print(f"Could not retrieve MPLS tunnel data, message: '{e}'")
+        except ServerError:
             self._mpls_multicast_destinations_data = None
             self._mpls_unicast_destinations_data = None
             self._route_table_data = None
@@ -212,8 +212,7 @@ class EvpnDestinationReport(object):
             self._tunnel_interface_data = state.server.get_data_store(DataStore.State).get_data(
                 tunnel_interface_path, recursive=True
             )
-        except ServerError as e:
-            print(f"Could not retrieve VXLAN tunnel data, message: '{e}'")
+        except ServerError:
             self._vxlan_interface_data = None
             self._tunnel_interface_data = None
 

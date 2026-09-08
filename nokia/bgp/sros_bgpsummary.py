@@ -29,6 +29,7 @@ class BgpSummaryFilter(object):
         self._groups = 0
         self._neighbors = 0
         self._path_memory = None
+        self._total_paths = 0
         self._neighbor_data = {}
         self._stats = {
             'total_ipv4_remote_rts' : 0,
@@ -126,6 +127,7 @@ class BgpSummaryFilter(object):
                 'groups',
                 'neighbors',
                 'stats',
+                'total_paths',
                 'path_memory'
             ]
         )
@@ -179,7 +181,7 @@ class BgpSummaryFilter(object):
         result = self._populate_data(arguments, state)
         self._set_formatters(result, state)
         output.print_data(result)
-        print(f'\nTry SR Linux command: show network-instance {self._netinst} protocols bgp summary\n')
+        output.print_line(f'\nTry SR Linux command: show network-instance {self._netinst} protocols bgp summary\n')
 
     # Dumping information into Data object based on CLI schema
     def _populate_data(self, arguments, state):
@@ -205,6 +207,7 @@ class BgpSummaryFilter(object):
         bgp.groups = self._groups
         bgp.neighbors = self._neighbors
         bgp.stats = self._stats
+        bgp.total_paths = self._total_paths
         bgp.path_memory = self._path_memory
         
         # Dumping neighbor information through self._neighbor_data filled in self_getBgpNeighborList_()
@@ -283,7 +286,15 @@ class BgpSummaryFilter(object):
         for group in data.network_instance.get().protocols.get().bgp.get().neighbor.items():
             self._neighbors += 1
 
-        self._path_memory = data.network_instance.get().protocols.get().bgp.get().statistics.get().path_memory
+        try:
+            self._path_memory = data.network_instance.get().protocols.get().bgp.get().statistics.get().path_memory
+        except Exception:
+            self._path_memory = 0
+
+        try:
+            self._total_paths = data.network_instance.get().protocols.get().bgp.get().statistics.get().total_paths
+        except Exception:
+            self._total_paths = 0
 
     def _getBgpNeighborList_(self, state, arguments):
         """Retrieves BGP neighbor state iterating through all neighbors and afi-safi. It then assigns them to the self class attributes.
@@ -384,17 +395,6 @@ class BgpSummaryFilter(object):
         # Assigning obtained information to a Class variable
         self._neighbor_data = neighbor_data
 
-    # formatting based on Key:Value for Debugging
-    # not required but used for initial debugging
-    def _printKeyValue (self, data:Data, state):
-        data.set_formatter('/bgp', ColumnFormatter(ancestor_keys=False, print_on_data=True))
-        print("\n***********************\nDEBUG: Print Formatter\n***********************")
-        data.set_formatter('/bgp', Indent(TagValueFormatter(ancestor_keys=False),indentation=0))
-        print(f'-----------------------------------------')
-        data.set_formatter('/bgp/neighbor', Indent(TagValueFormatter(ancestor_keys=False),indentation=4))
-        print(f'-----------------------------------------')
-        data.set_formatter('/bgp/neighbor/afi_safi', Indent(TagValueFormatter(ancestor_keys=False),indentation=8))
-
     # formatting based on data schema provided in self._get_data_schema()
     def _set_formatters(self, data:Data, state):
         data.set_formatter('/bgp', SrosBgpHeaderFormatter())
@@ -413,7 +413,8 @@ class SrosBgpHeaderFormatter(Formatter):
         yield f'Total Peer Groups       : {entry.groups:<3}         Total Peers                 : {entry.neighbors:<4}      '
         yield f'Total VPN Peer Groups   : 0           Total VPN Peers             : 0         '
         yield f'Current Internal Groups : 1           Max Internal Groups         : 1         '
-        yield f'Total BGP Paths         : 52          Total Path Memory           : {entry.path_memory:<6}'
+        total_paths = getattr(entry, 'total_paths', 0)
+        yield f'Total BGP Paths         : {total_paths:<12}Total Path Memory           : {entry.path_memory:<6}'
         yield f' '
         yield f"Total IPv4 Remote Rts   : {entry.stats['total_ipv4_remote_rts']:<10}  Total IPv4 Rem. Active Rts  : {entry.stats['total_ipv4_rem_active_rts']:<10}"
         yield f"Total IPv6 Remote Rts   : {entry.stats['total_ipv6_remote_rts']:<10}  Total IPv6 Rem. Active Rts  : {entry.stats['total_ipv6_rem_active_rts']:<10}"

@@ -341,6 +341,7 @@ TEST_SUITES = {
             ("show version", "panos", "show version should not output synthetic SROS panos build path"),
             ("show system information", "2026-09-02T20:32:38.586Z", "show system information must not output hardcoded boot timestamp"),
             ("show router arp", "03h59m50s", "show router arp must not contain hardcoded 03h59m50s expiry"),
+            ("show router bgp summary", "Total BGP Paths         : 52", "show router bgp summary must dynamically query total paths rather than hardcoding 52"),
         ],
         "positive_assertions": [
             ("show version", "SRLinux-", "show version must output authentic SRLinux banner in SROS format"),
@@ -496,16 +497,21 @@ def run_suite(suite_name, suite, args, parallel=True):
 
     return passed, failed, failures
 
-def validate_recommended_srl_commands(target_node="leaf1"):
+def validate_recommended_srl_commands(target_nodes="leaf1"):
     """
     Validate that all recommended SR Linux commands suggested in the output
     footers of MultiCLI show commands are syntactically valid and executable
     on native Nokia SR Linux switches.
     """
+    if isinstance(target_nodes, str):
+        target_nodes = [target_nodes]
+
     recommended_commands = [
         "show interface brief",
         "show interface",
         "show interface detail",
+        "show interface ethernet-1/1 brief",
+        "show interface ethernet-1/1 detail",
         "show system lldp neighbor",
         "show arpnd arp-entries",
         "show lag",
@@ -536,43 +542,44 @@ def validate_recommended_srl_commands(target_node="leaf1"):
         "show tunnel-interface vxlan-interface bridge-table unicast-destinations destination",
     ]
 
-    print(f"\n--- Validating {len(recommended_commands)} Recommended SR Linux Commands on '{target_node}' ---")
-    passed = 0
-    failed = 0
+    total_passed = 0
+    total_failed = 0
     failures = []
 
-    for idx, cmd in enumerate(recommended_commands, 1):
-        rc, stdout, stderr, dt = run_command(target_node, cmd)
-        out = stdout + stderr
-        errors = []
-        if rc != 0:
-            errors.append(f"Non-zero exit code: {rc}")
-        if "usage: show" in out:
-            errors.append("Command printed 'usage: show' (incomplete token)")
-        if "Parsing error" in out:
-            errors.append("Parsing error in SR Linux syntax")
-        if "Unknown command" in out:
-            errors.append("Unknown command in SR Linux CLI")
-        # Some protocol tables (like IS-IS when unconfigured) legitimately return empty output with exit code 0
-        if not stdout.strip() and not stderr.strip() and "isis" not in cmd:
-            errors.append("Output is completely empty")
+    for target_node in target_nodes:
+        print(f"\n--- Validating {len(recommended_commands)} Recommended SR Linux Commands on '{target_node}' ---")
+        for idx, cmd in enumerate(recommended_commands, 1):
+            rc, stdout, stderr, dt = run_command(target_node, cmd)
+            out = stdout + stderr
+            errors = []
+            if rc != 0:
+                errors.append(f"Non-zero exit code: {rc}")
+            if "usage: show" in out:
+                errors.append("Command printed 'usage: show' (incomplete token)")
+            if "Parsing error" in out:
+                errors.append("Parsing error in SR Linux syntax")
+            if "Unknown command" in out:
+                errors.append("Unknown command in SR Linux CLI")
+            # Some protocol tables (like IS-IS when unconfigured) legitimately return empty output with exit code 0
+            if not stdout.strip() and not stderr.strip() and "isis" not in cmd:
+                errors.append("Output is completely empty")
 
-        if errors:
-            failed += 1
-            failures.append({
-                "suite": "Recommended SRL Commands",
-                "node": target_node,
-                "command": cmd,
-                "errors": errors,
-                "stdout": stdout,
-                "stderr": stderr
-            })
-            print(f"  [{target_node}] [{idx:2d}/{len(recommended_commands):2d}] {cmd:<60} -> FAIL ({dt:.2f}s) - {'; '.join(errors)}")
-        else:
-            passed += 1
-            print(f"  [{target_node}] [{idx:2d}/{len(recommended_commands):2d}] {cmd:<60} -> PASS ({dt:.2f}s)")
+            if errors:
+                total_failed += 1
+                failures.append({
+                    "suite": "Recommended SRL Commands",
+                    "node": target_node,
+                    "command": cmd,
+                    "errors": errors,
+                    "stdout": stdout,
+                    "stderr": stderr
+                })
+                print(f"  [{target_node}] [{idx:2d}/{len(recommended_commands):2d}] {cmd:<60} -> FAIL ({dt:.2f}s) - {'; '.join(errors)}")
+            else:
+                total_passed += 1
+                print(f"  [{target_node}] [{idx:2d}/{len(recommended_commands):2d}] {cmd:<60} -> PASS ({dt:.2f}s)")
 
-    return passed, failed, failures
+    return total_passed, total_failed, failures
 
 def validate(args):
     t_start = time.time()
@@ -623,7 +630,8 @@ def validate(args):
                 all_failures.extend(fails)
 
     # Validate all recommended SR Linux commands
-    p_srl, f_srl, fails_srl = validate_recommended_srl_commands(args.arista_node)
+    target_nodes = list(dict.fromkeys([args.arista_node, args.cisco_node, args.juniper_node, args.nokia_node]))
+    p_srl, f_srl, fails_srl = validate_recommended_srl_commands(target_nodes)
     total_passed += p_srl
     total_failed += f_srl
     all_failures.extend(fails_srl)
