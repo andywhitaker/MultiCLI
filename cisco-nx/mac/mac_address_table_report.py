@@ -132,7 +132,8 @@ class MacAddressTableReport:
     def _get_vni_from_netinst_data (self, network_vxlan_interface_data):
         vxlan_interface_name_index_list=[]
         for network_vxlan_interface_entry in network_vxlan_interface_data.get_descendants('/network-instance/vxlan-interface'):
-            vxlan_interface_name, subint_index = network_vxlan_interface_entry.name.split('.', 1)
+            raw_v_name = str(network_vxlan_interface_entry.name)
+            vxlan_interface_name, subint_index = raw_v_name.split('.', 1) if '.' in raw_v_name else (raw_v_name, '0')
             tunnel_interface_data = self._fetch_state_tunnel_interface(vxlan_interface_name, subint_index)
             for vxlan_int in tunnel_interface_data.get_descendants('/tunnel-interface/vxlan-interface'):
                 vni = vxlan_int.ingress.get().vni
@@ -150,9 +151,11 @@ class MacAddressTableReport:
                     interface_name = interface_ref.interface
                     subint_index = interface_ref.subinterface
                 else:
-                    interface_name, subint_index = network_interface_entry.name.split('.', 1)
+                    raw_name = str(network_interface_entry.name)
+                    interface_name, subint_index = raw_name.split('.', 1) if '.' in raw_name else (raw_name, '0')
             else:
-                interface_name, subint_index = network_interface_entry.name.split('.', 1)
+                raw_name = str(network_interface_entry.name)
+                interface_name, subint_index = raw_name.split('.', 1) if '.' in raw_name else (raw_name, '0')
 
             if any(sub in interface_name for sub in ["irb", "lo"]):
                 continue
@@ -187,9 +190,11 @@ class MacAddressTableReport:
                     interface_name = interface_ref.interface
                     subint_index = interface_ref.subinterface
                 else:
-                    interface_name, subint_index = network_interface_entry.name.split('.', 1)
+                    raw_name = str(network_interface_entry.name)
+                    interface_name, subint_index = raw_name.split('.', 1) if '.' in raw_name else (raw_name, '0')
             else:
-                interface_name, subint_index = network_interface_entry.name.split('.', 1)
+                raw_name = str(network_interface_entry.name)
+                interface_name, subint_index = raw_name.split('.', 1) if '.' in raw_name else (raw_name, '0')
 
             if not "irb" in interface_name:
                 continue
@@ -202,7 +207,15 @@ class MacAddressTableReport:
             else:
                 anycast_gw_mac = ""
 
-            hw_mac = hw_mac_data.interface.get().ethernet.get().hw_mac_address
+            hw_mac = ""
+            try:
+                if hw_mac_data and hasattr(hw_mac_data, 'interface') and hw_mac_data.interface.exists():
+                    intf_node = hw_mac_data.interface.get()
+                    if hasattr(intf_node, 'ethernet') and intf_node.ethernet.exists():
+                        eth_node = intf_node.ethernet.get()
+                        hw_mac = getattr(eth_node, 'hw_mac_address', '') or ''
+            except Exception:
+                hw_mac = ""
             interface_name_index_list.append({"name": interface_name, "index": str(subint_index), "hw_mac": hw_mac, "anycast_gw_mac": anycast_gw_mac})
 
         return interface_name_index_list

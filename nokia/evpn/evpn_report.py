@@ -377,10 +377,17 @@ class EvpnDestinationReport(object):
                 .unicast_destinations.get()
                 .es_destination.items()
             ):
-                updates = [
-                    datetime.strptime(mac.last_update, "%Y-%m-%dT%H:%M:%S.%fZ")
-                    for mac in es_destination.mac_table.get().mac.items()
-                ]
+                updates = []
+                if hasattr(es_destination, 'mac_table') and es_destination.mac_table.exists():
+                    for mac in es_destination.mac_table.get().mac.items():
+                        if hasattr(mac, 'last_update') and mac.last_update:
+                            try:
+                                updates.append(datetime.strptime(mac.last_update, "%Y-%m-%dT%H:%M:%S.%fZ"))
+                            except Exception:
+                                try:
+                                    updates.append(datetime.fromisoformat(mac.last_update.replace("Z", "+00:00")))
+                                except Exception:
+                                    pass
                 ethernet_segments.append(
                     EthernetSegment(
                         es_destination.esi,
@@ -392,7 +399,7 @@ class EvpnDestinationReport(object):
                             destination.tep
                             for destination in es_destination.destination.items()
                         ],
-                        max(updates),
+                        max(updates) if updates else datetime.now(),
                     )
                 )
 
@@ -451,10 +458,17 @@ class EvpnDestinationReport(object):
 
         # Ethernet Segments
         for es in bridge_table.unicast_destinations.get().es_destination.items():
-            updates = [
-                datetime.strptime(mac.last_update, "%Y-%m-%dT%H:%M:%S.%fZ")
-                for mac in es.mac_table.get().mac.items()
-            ]
+            updates = []
+            if hasattr(es, 'mac_table') and es.mac_table.exists():
+                for mac in es.mac_table.get().mac.items():
+                    if hasattr(mac, 'last_update') and mac.last_update:
+                        try:
+                            updates.append(datetime.strptime(mac.last_update, "%Y-%m-%dT%H:%M:%S.%fZ"))
+                        except Exception:
+                            try:
+                                updates.append(datetime.fromisoformat(mac.last_update.replace("Z", "+00:00")))
+                            except Exception:
+                                pass
             ethernet_segments.append(
                 EthernetSegment(
                     es.esi,
@@ -463,7 +477,7 @@ class EvpnDestinationReport(object):
                         for mac_type in es.statistics.get().mac_type.items()
                     ),
                     ", ".join([vtep.address for vtep in es.vtep.items()]),
-                    max(updates),
+                    max(updates) if updates else datetime.now(),
                 )
             )
 

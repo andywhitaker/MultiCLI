@@ -36,6 +36,23 @@ def format_cisco_intf(name, short=True):
         return f"Vlan{num}"
     return name
 
+def cisco_to_srl_intf(name):
+    """Convert Cisco NX-OS interface name to SR Linux format."""
+    if not name or name == '*':
+        return '*'
+    name = str(name).strip()
+    m = re.match(r'^(?:Ethernet|Eth)(\d+/\d+)$', name, re.IGNORECASE)
+    if m:
+        return f"ethernet-{m.group(1)}"
+    m = re.match(r'^(?:Loopback|Lo)(\d+)$', name, re.IGNORECASE)
+    if m:
+        num = m.group(1)
+        return "system0" if num == "0" else f"lo{num}"
+    m = re.match(r'^(?:Port-channel|Po)(\d+)$', name, re.IGNORECASE)
+    if m:
+        return f"lag{m.group(1)}"
+    return name
+
 def cisco_mac_format(mac):
     """Format MAC address to Cisco dotted hex notation (xxxx.xxxx.xxxx)."""
     if not mac or mac == '--':
@@ -618,7 +635,8 @@ class CiscoInterfaceReports:
                 except Exception:
                     target_name = '*'
 
-        path = build_path('/interface[name={name}]', name=target_name)
+        srl_name = cisco_to_srl_intf(target_name)
+        path = build_path('/interface[name={name}]', name=srl_name)
         try:
             data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True, include_container_children=True)
         except Exception:
@@ -672,6 +690,14 @@ class CiscoInterfaceReports:
                 elif '1G' in port_speed:
                     bw_kbit = 1000000
                     speed_val = "1000 Mb/s"
+
+                auto_neg = "off"
+                try:
+                    an = getattr(eth, 'auto_negotiate', None)
+                    if an is True or an == 'true' or an == 'enable':
+                        auto_neg = "on"
+                except Exception:
+                    auto_neg = "off"
 
                 try:
                     raw_duplex = eth.duplex_mode
@@ -751,17 +777,13 @@ class CiscoInterfaceReports:
             if ip_line:
                 block_lines.append(ip_line)
             block_lines.extend([
-                f"  MTU {mtu} bytes, BW {bw_kbit} Kbit, DLY 10 usec",
+                f"  MTU {mtu} bytes, BW {bw_kbit} Kbit",
                 f"  reliability 255/255, txload 1/255, rxload 1/255",
                 f"  Encapsulation ARPA, medium is broadcast",
                 f"  Port mode is {mode_str}",
                 f"  {duplex}-duplex, {speed_val}",
-                f"  Beacon is turned off",
-                f"  Auto-Negotiation is turned on",
-                f"  Input flow-control is off, output flow-control is off",
-                f"  Auto-mdix is turned off",
+                f"  Auto-Negotiation is turned {auto_neg}",
                 f"  Rate mode is dedicated",
-                f"  Switchport monitor is off",
                 f"  EtherType is 0x8100",
                 f"  {carrier_transitions} link status changes since last clear",
                 f"  Last clearing of \"show interface\" counters never",

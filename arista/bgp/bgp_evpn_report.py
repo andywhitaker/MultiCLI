@@ -398,18 +398,20 @@ class IpBgpReport:
                             # Get message statistics
                             messages_received = 0
                             messages_sent = 0
+                            received_queue = 0
+                            sent_queue = 0
                 
                             if hasattr(neighbor, 'received_messages'):
                                 rm = neighbor.received_messages.get()
                                 if rm and hasattr(rm, 'total_messages'):
-                                    messages_received = rm.total_messages
-                                    received_queue = rm.queue_depth
+                                    messages_received = getattr(rm, 'total_messages', 0) or 0
+                                    received_queue = getattr(rm, 'queue_depth', 0) or 0
                         
                             if hasattr(neighbor, 'sent_messages'):
                                 sm = neighbor.sent_messages.get()
                                 if sm and hasattr(sm, 'total_messages'):
-                                    messages_sent = sm.total_messages
-                                    sent_queue = sm.queue_depth
+                                    messages_sent = getattr(sm, 'total_messages', 0) or 0
+                                    sent_queue = getattr(sm, 'queue_depth', 0) or 0
                             # Get prefix information
                             prefixes_received = 0
                             prefixes_accepted = 0                                       

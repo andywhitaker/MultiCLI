@@ -76,7 +76,7 @@ class EthernetSwitchingReport:
         self._set_all_formatters(data_root)
         with output.stream_data(data_root):
             self._populate_mac_table(netinst_data, data_root)
-        output.print(srlinux_suggested_command)
+        output.print_line(srlinux_suggested_command)
         data_root.synchronizer.flush_children(data_root)
 
     def _fetch_state_network(self, netinst_name):
@@ -142,9 +142,11 @@ class EthernetSwitchingReport:
                     interface_name = interface_ref.interface
                     subint_index = interface_ref.subinterface
                 else:
-                    interface_name, subint_index = network_interface_entry.name.split('.', 1)
+                    raw_name = str(network_interface_entry.name)
+                    interface_name, subint_index = raw_name.split('.', 1) if '.' in raw_name else (raw_name, '0')
             else:
-                interface_name, subint_index = network_interface_entry.name.split('.', 1)
+                raw_name = str(network_interface_entry.name)
+                interface_name, subint_index = raw_name.split('.', 1) if '.' in raw_name else (raw_name, '0')
 
             if any(sub in interface_name for sub in ["irb", "lo"]):
                 continue
@@ -179,9 +181,11 @@ class EthernetSwitchingReport:
                     interface_name = interface_ref.interface
                     subint_index = interface_ref.subinterface
                 else:
-                    interface_name, subint_index = network_interface_entry.name.split('.', 1)
+                    raw_name = str(network_interface_entry.name)
+                    interface_name, subint_index = raw_name.split('.', 1) if '.' in raw_name else (raw_name, '0')
             else:
-                interface_name, subint_index = network_interface_entry.name.split('.', 1)
+                raw_name = str(network_interface_entry.name)
+                interface_name, subint_index = raw_name.split('.', 1) if '.' in raw_name else (raw_name, '0')
 
             if not "irb" in interface_name:
                 continue
@@ -194,7 +198,15 @@ class EthernetSwitchingReport:
             else:
                 anycast_gw_mac = ""
 
-            hw_mac = hw_mac_data.interface.get().ethernet.get().hw_mac_address
+            hw_mac = ""
+            try:
+                if hw_mac_data and hasattr(hw_mac_data, 'interface') and hw_mac_data.interface.exists():
+                    intf_node = hw_mac_data.interface.get()
+                    if hasattr(intf_node, 'ethernet') and intf_node.ethernet.exists():
+                        eth_node = intf_node.ethernet.get()
+                        hw_mac = getattr(eth_node, 'hw_mac_address', '') or ''
+            except Exception:
+                hw_mac = ""
             interface_name_index_list.append({"name": interface_name, "index": str(subint_index), "hw_mac": hw_mac, "anycast_gw_mac": anycast_gw_mac})
 
         return interface_name_index_list

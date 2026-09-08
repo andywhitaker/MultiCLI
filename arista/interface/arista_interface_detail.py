@@ -181,18 +181,22 @@ class InterfaceDetails(object):
             except Exception:
                 bandwidth = None
             duplex = "Full"
+            auto_negotiation = "off"
             try:
                 if hasattr(intf, 'ethernet') and intf.ethernet.exists():
-                    duplex = getattr(intf.ethernet.get(), 'duplex_mode', 'Full') or 'Full'
+                    eth_obj = intf.ethernet.get()
+                    duplex = getattr(eth_obj, 'duplex_mode', 'Full') or 'Full'
+                    an = getattr(eth_obj, 'auto_negotiate', None)
+                    if an is True or an == 'true' or an == 'enable':
+                        auto_negotiation = "on"
             except Exception:
                 duplex = "Full"
-            auto_negotiation = "on"
-            uni_link = "disabled"
+                auto_negotiation = "off"
             #calculating the uptime
-            if oper_status == "up":
+            if oper_status == "up" and hasattr(intf, 'last_change') and intf.last_change:
                 uptime = self._build_last_change_string(intf.last_change)
             else:
-                uptime = "00"
+                uptime = "never"
             loopback_mode = getattr(intf, 'loopback_mode', 'None')
             link_changes = 0
             input_packets = 0
@@ -250,7 +254,7 @@ class InterfaceDetails(object):
 {{ interface_name }} is {{ oper_status }}, line protocol is {{ line_protocol_status }} ({{ connection_status }})
   Hardware is {{ hardware }}, address is {{ mac_address }} (bia {{ bia_address }})
   Ethernet MTU {{ mtu }} bytes, BW {{ bandwidth }} kbit
-  {{ duplex }}-duplex, {{ speed }}, auto negotiation: {{ auto_negotiation }}, uni-link: {{ uni_link }}
+  {{ duplex }}-duplex, {{ speed }}, auto negotiation: {{ auto_negotiation }}
   Up {{ uptime }}
   Loopback Mode : {{ loopback_mode }}
   {{ link_changes }} link status changes since last clear
@@ -272,7 +276,7 @@ class InterfaceDetails(object):
             data = {
             "interface_name": interface_name,
             "oper_status": oper_status,
-            "line_protocol_status": oper_status,
+            "line_protocol_status": line_protocol_status,
             "connection_status": connection_status,
             "hardware": "Ethernet",
             "mac_address": mac_address,
@@ -282,7 +286,6 @@ class InterfaceDetails(object):
             "duplex": duplex,
             "speed": port_speed,
             "auto_negotiation": auto_negotiation,
-            "uni_link": uni_link,
             "uptime": uptime,
             "loopback_mode": loopback_mode,
             "link_changes": link_changes,

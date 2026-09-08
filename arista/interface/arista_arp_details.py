@@ -97,49 +97,72 @@ class ArpDetails(object):
         return data
     
     def _add_subinterface(self, data, interface_name, server_data, v4):
+        if not server_data:
+            return
         for subinterface in server_data.items():
-            self._add_neighbor(data, interface_name, subinterface.index,
-                               subinterface.ipv4.get().arp.get().neighbor if v4
-                               else subinterface.ipv6.get().neighbor_discovery.get().neighbor, v4)
+            neighbor_data = None
+            try:
+                if v4:
+                    ipv4 = subinterface.ipv4.get() if hasattr(subinterface, 'ipv4') else None
+                    arp = ipv4.arp.get() if ipv4 and hasattr(ipv4, 'arp') else None
+                    neighbor_data = arp.neighbor if arp and hasattr(arp, 'neighbor') else None
+                else:
+                    ipv6 = subinterface.ipv6.get() if hasattr(subinterface, 'ipv6') else None
+                    nd = ipv6.neighbor_discovery.get() if ipv6 and hasattr(ipv6, 'neighbor_discovery') else None
+                    neighbor_data = nd.neighbor if nd and hasattr(nd, 'neighbor') else None
+            except Exception:
+                neighbor_data = None
+            if neighbor_data:
+                self._add_neighbor(data, interface_name, subinterface.index, neighbor_data, v4)
     
     @staticmethod
     def convert_mac(mac):
-            mac = mac.replace(":", "").replace("-", "").lower()
+            if not mac:
+                return ""
+            mac = str(mac).replace(":", "").replace("-", "").lower()
             if len(mac) != 12:
                 return mac
             return f"{mac[0:4]}.{mac[4:8]}.{mac[8:12]}"
 
     @staticmethod
     def convert_iso_to_hms(iso_time_str):
-        dt = datetime.fromisoformat(iso_time_str.replace("Z", "+00:00"))  # Convert to datetime object
-        return dt.strftime("%H:%M:%S")  # Format as hh:mm:ss
-
-    
+        if not iso_time_str:
+            return "-"
+        try:
+            dt = datetime.fromisoformat(str(iso_time_str).replace("Z", "+00:00"))  # Convert to datetime object
+            return dt.strftime("%H:%M:%S")  # Format as hh:mm:ss
+        except Exception:
+            return str(iso_time_str)
 
     def _add_neighbor(self, data, interface_name, subinterface_index, server_data, v4):   
+        if not server_data:
+            return
         for neighbor in server_data.items():
+            if not neighbor:
+                continue
             if v4:
                 # Create the neighbor row using the new schema.
                 child = data.neighbor.create(neighbor.ipv4_address)
                 self._total_entries += 1
 
                 # Compute the "Age (sec)" as a natural relative time string.
-                expiration_time = neighbor.expiration_time
+                expiration_time = getattr(neighbor, 'expiration_time', None)
                 # time_remaining = strings.natural_relative_time(expiration_time) if expiration_time else "0:00:00"
                 child.age_sec = self.convert_iso_to_hms(expiration_time)
                 # The "Hardware Addr" column.
-                child.hardware_addr = self.convert_mac(neighbor.link_layer_address)
+                hw_addr = getattr(neighbor, 'link_layer_address', '')
+                child.hardware_addr = self.convert_mac(hw_addr) if hw_addr else ''
                 child.interface = f"{interface_name}.{subinterface_index}" if subinterface_index != interface_name else interface_name
                 child.synchronizer.flush_fields(child)
             else:
                 child = data.neighbor.create(interface_name, subinterface_index, neighbor.ipv6_address)
                 self._total_entries += 1
-                expiration_time = neighbor.next_state_time
+                expiration_time = getattr(neighbor, 'next_state_time', None)
                 time_remaining = strings.natural_relative_time(expiration_time) if expiration_time else None
-                child.link_layer_address = neighbor.link_layer_address
+                child.link_layer_address = getattr(neighbor, 'link_layer_address', '')
                 child.next_state_change = time_remaining
-                child.current_state = neighbor.current_state
-                child.is_router = neighbor.is_router
+                child.current_state = getattr(neighbor, 'current_state', '')
+                child.is_router = getattr(neighbor, 'is_router', False)
                 child.synchronizer.flush_fields(child)
 
     

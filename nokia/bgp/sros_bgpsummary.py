@@ -551,7 +551,7 @@ class SrosBgpAfiSafiFormatter(TagValueFormatter):
         
         sros_afisafi = {
             'l3vpn-ipv4-unicast' : 'VpnIPv4',
-            'l3vpn-ipv6-unicast' : 'VpnIPv4',
+            'l3vpn-ipv6-unicast' : 'VpnIPv6',
             'evpn' : 'Evpn',
             'ipv4-unicast' : 'IPv4',
             'ipv6-unicast' : 'IPv6',
@@ -560,6 +560,7 @@ class SrosBgpAfiSafiFormatter(TagValueFormatter):
 
         }
 
-        yield f'                                             {entry.received_routes}/{entry.active_routes}/{entry.sent_routes} ({sros_afisafi[entry.name]})\n'
+        afi_safi_label = sros_afisafi.get(entry.name, entry.name)
+        yield f'                                             {entry.received_routes}/{entry.active_routes}/{entry.sent_routes} ({afi_safi_label})\n'
   
         
