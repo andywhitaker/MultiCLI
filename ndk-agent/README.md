@@ -36,8 +36,8 @@ admin@srl-2:~$ sudo dpkg -i srl-multicli_arm64.deb
 Selecting previously unselected package srl-multicli.
 (Reading database ... 40773 files and directories currently installed.)
 Preparing to unpack srl-multicli_arm64.deb ...
-Unpacking srl-multicli (1.0.0) ...
-Setting up srl-multicli (1.0.0) ...
+Unpacking srl-multicli (0.2.0) ...
+Setting up srl-multicli (0.2.0) ...
 Installing netns to /opt/srlinux/python/virtual-env/lib/python3.13/dist-packages
 Exit from bash shell to get to SR Linux CLI
 admin@srl-2:~$ exit
@@ -53,7 +53,7 @@ A:admin@srl-2# show system application multicli
   +----------+------+---------+---------+--------------------------+
   |   Name   | PID  |  State  | Version |       Last Change        |
   +==========+======+=========+=========+==========================+
-  | multicli | 7219 | running | v1.0.0  | 2026-04-11T22:37:29.545Z |
+  | multicli | 7219 | running | v0.2.0  | 2026-04-11T22:37:29.545Z |
   +----------+------+---------+---------+--------------------------+
 ```
 
@@ -77,13 +77,13 @@ A:admin@srl-2# / multicli enabled-nos nokia-sros
 --{ !* candidate shared default }--[  ]--
 A:admin@srl-2# info detail multicli
     enabled-nos nokia-sros
-    repo-url https://github.com/srl-labs/MultiCLI/archive/refs/tags/v1.0.0.zip
+    repo-url https://github.com/srl-labs/MultiCLI/archive/refs/tags/v0.2.0.zip
 ```
 If no errors are present, “No errors” should be displayed in the error-messages leaf.
 ```
 A:admin@srl-2# info from state multicli
     enabled-nos nokia-sros
-    repo-url https://github.com/srl-labs/MultiCLI/archive/refs/tags/v1.0.0.zip
+    repo-url https://github.com/srl-labs/MultiCLI/archive/refs/tags/v0.2.0.zip
     error-messages "No errors"
 ```
 For the commands to be available, the user must re-login to the node. Below is an example of an SR OS command executed via MultiCLI on SR Linux:
