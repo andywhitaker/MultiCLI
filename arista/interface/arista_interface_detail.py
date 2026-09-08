@@ -78,10 +78,12 @@ class InterfaceDetails(object):
             if not speed or not isinstance(speed, str):
                 raise ValueError("Invalid speed value provided")
 
-            number = float(speed.rstrip('GMK'))  # Remove G/M/K suffixes
-            unit = speed[-1]
+            number = float(speed.rstrip('GMKTbps '))  # Remove G/M/K/T suffixes
+            unit = speed.strip()[-1].upper()
 
-            if unit == 'G':
+            if unit == 'T':
+                return int(number * 1_000_000_000_000)
+            elif unit == 'G':
                 return int(number * 1_000_000_000)
             elif unit == 'M':
                 return int(number * 1_000_000)
@@ -92,6 +94,25 @@ class InterfaceDetails(object):
 
         except Exception:
             return None
+
+    def convert_speed_to_kbit(self, speed):
+        try:
+            if not speed or not isinstance(speed, str):
+                raise ValueError("Invalid speed value provided")
+            clean_speed = speed.strip()
+            unit = clean_speed[-1].upper()
+            num_str = clean_speed[:-1] if unit in {'T', 'G', 'M', 'K'} else clean_speed
+            number = float(num_str)
+            multipliers = {
+                'T': 1_000_000_000,
+                'G': 1_000_000,
+                'M': 1_000,
+                'K': 1,
+            }
+            mult = multipliers.get(unit, 1_000_000)
+            return int(number * mult)
+        except Exception:
+            return 100_000_000
 
 
                 
@@ -155,7 +176,7 @@ class InterfaceDetails(object):
                 if not port_speed or not isinstance(port_speed, str):
                     raise ValueError("Invalid or missing port speed")
 
-                bandwidth = int(port_speed.rstrip("GMK")) * 1_000_000
+                bandwidth = self.convert_speed_to_kbit(port_speed)
 
             except Exception:
                 bandwidth = None

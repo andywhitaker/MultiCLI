@@ -89,6 +89,21 @@ class EvpnDestinationReport(object):
 
         return root
 
+    def _is_mpls_capable(self):
+        c = (self._chassis_type or "").lower()
+        if c.startswith("7730") or c.startswith("7250"):
+            return True
+        if any(v in c for v in ["sim", "vsim", "virtual", "containerlab"]):
+            return True
+        return False
+
+    def _is_vxlan_capable(self):
+        c = (self._chassis_type or "").lower()
+        if c.startswith("7730"):
+            return False
+        # 7220, 7250, 7215, virtual containers, and general fallback support VXLAN
+        return True
+
     def print_mpls(
         self,
         state,
@@ -100,13 +115,11 @@ class EvpnDestinationReport(object):
 
         data = Data(schema=arguments.schema)
 
-        if self._chassis_type.startswith("7730"):
-            self._populate_data_mpls(data)
+        if not self._is_mpls_capable():
+            raise ExecuteError(f"EVPN-MPLS is not supported on chassis type '{self._chassis_type or 'unknown'}' (requires 7730 SXR or 7250 IXR)")
 
-        if self._chassis_type.startswith("7220"):
-            raise ExecuteError("VxLAN not available on IXR 7220")
-
-        self._set_formatters(data, arguments)
+        self._populate_data_mpls(data)
+        self._set_formatters(data, arguments, mode="mpls")
         output.print_data(data)
 
     def print_vxlan(
@@ -120,13 +133,11 @@ class EvpnDestinationReport(object):
 
         data = Data(schema=arguments.schema)
 
-        if self._chassis_type.startswith("7730"):
-            raise ExecuteError("VxLan not available on SXR 7730")
+        if not self._is_vxlan_capable():
+            raise ExecuteError(f"VxLAN not available on SXR 7730")
 
-        if self._chassis_type.startswith("7220"):
-            self._populate_data_vxlan(data)
-
-        self._set_formatters(data, arguments)
+        self._populate_data_vxlan(data)
+        self._set_formatters(data, arguments, mode="vxlan")
         output.print_data(data)
 
     def _fetch_state(self, state, arguments):
@@ -143,10 +154,10 @@ class EvpnDestinationReport(object):
         except ServerError:
             self._chassis_type = ""
 
-        if self._chassis_type.startswith("7730"):
+        if self._is_mpls_capable():
             self._fetch_state_mpls(state, arguments)
 
-        if self._chassis_type.startswith("7220"):
+        if self._is_vxlan_capable():
             self._fetch_state_vxlan(state, arguments)
 
     def _get_service_name(self, state, arguments):
@@ -221,32 +232,34 @@ class EvpnDestinationReport(object):
         ethernet_segments = {}
 
         # multicast
-        for (
-            network_instance
-        ) in self._mpls_multicast_destinations_data.network_instance.items():
-            tunnels[network_instance.name] = self.get_mpls_multicast_tunnels(
-                network_instance.name
-            )
+        if self._mpls_multicast_destinations_data and hasattr(self._mpls_multicast_destinations_data, 'network_instance'):
+            for (
+                network_instance
+            ) in self._mpls_multicast_destinations_data.network_instance.items():
+                tunnels[network_instance.name] = self.get_mpls_multicast_tunnels(
+                    network_instance.name
+                )
 
         # unicast
-        for (
-            network_instance
-        ) in self._mpls_unicast_destinations_data.network_instance.items():
-            existing_tunnels = (
-                tunnels[network_instance.name]
-                if network_instance.name in tunnels.keys()
-                else []
-            )
-            unicast_tunnels = self.get_mpls_unicast_tunnels(network_instance.name)
-            existing_tunnels.extend(unicast_tunnels)
+        if self._mpls_unicast_destinations_data and hasattr(self._mpls_unicast_destinations_data, 'network_instance'):
+            for (
+                network_instance
+            ) in self._mpls_unicast_destinations_data.network_instance.items():
+                existing_tunnels = (
+                    tunnels[network_instance.name]
+                    if network_instance.name in tunnels.keys()
+                    else []
+                )
+                unicast_tunnels = self.get_mpls_unicast_tunnels(network_instance.name)
+                existing_tunnels.extend(unicast_tunnels)
 
-        # ethernet segments
-        for (
-            network_instance
-        ) in self._mpls_unicast_destinations_data.network_instance.items():
-            ethernet_segments[network_instance.name] = self.get_mpls_ethernet_segments(
-                network_instance.name
-            )
+            # ethernet segments
+            for (
+                network_instance
+            ) in self._mpls_unicast_destinations_data.network_instance.items():
+                ethernet_segments[network_instance.name] = self.get_mpls_ethernet_segments(
+                    network_instance.name
+                )
 
         # convert to schema node
         for netinst in tunnels:
@@ -271,15 +284,16 @@ class EvpnDestinationReport(object):
         tunnels = {}
         ethernet_segments = {}
 
-        for network_instance in self._vxlan_interface_data.network_instance.items():
-            for vxlan_interface in network_instance.vxlan_interface.items():
-                # tunnels
-                tunnels[network_instance.name] = self.get_vxlan_tunnels(
-                    vxlan_interface.name
-                )
-                ethernet_segments[network_instance.name] = (
-                    self.get_vxlan_ethernet_segments(vxlan_interface.name)
-                )
+        if self._vxlan_interface_data and hasattr(self._vxlan_interface_data, 'network_instance'):
+            for network_instance in self._vxlan_interface_data.network_instance.items():
+                for vxlan_interface in network_instance.vxlan_interface.items():
+                    # tunnels
+                    tunnels[network_instance.name] = self.get_vxlan_tunnels(
+                        vxlan_interface.name
+                    )
+                    ethernet_segments[network_instance.name] = (
+                        self.get_vxlan_ethernet_segments(vxlan_interface.name)
+                    )
 
         # convert to schema node
         for netinst in tunnels:
@@ -476,15 +490,13 @@ class EvpnDestinationReport(object):
         resolving_tunnel = next_hop.resolving_tunnel.get()
         return f"{resolving_tunnel.tunnel_type}:{resolving_tunnel.tunnel_id}"
 
-    def _set_formatters(self, data, arguments):
-        if self._chassis_type.startswith("7220"):
+    def _set_formatters(self, data, arguments, mode=None):
+        if mode == "vxlan" or (mode is None and self._is_vxlan_capable()):
             data.set_formatter("/network/vxlan_tunnel", VXLANVTEPFormatter())
-
             data.set_formatter("/network/ethernet_segment", VXLANESFormatter())
 
-        if self._chassis_type.startswith("7730"):
+        if mode == "mpls" or (mode is None and self._is_mpls_capable()):
             data.set_formatter("/network/mpls_tunnel", MPLSVTEPFormatter())
-
             data.set_formatter("/network/ethernet_segment", MPLSESFormatter())
 
 

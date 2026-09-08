@@ -377,8 +377,7 @@ class StatisticsFormatter(Formatter):
 
 srlinux_suggested_command = """ 
 ------------------------------------------------------------------------------------------------
-Try SR Linux command:
-->   show network-instance bridge-table mac-table all
-->   show interface brief
+Try SR Linux command: show network-instance bridge-table mac-table all
+Try SR Linux command: show interface brief
 """
 
