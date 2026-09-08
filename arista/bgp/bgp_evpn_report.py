@@ -1,6 +1,7 @@
 from srlinux.syntax import Syntax
 from srlinux.location import build_path
 from srlinux.mgmt.cli import KeyCompleter
+from srlinux.schema.data_store import DataStore
 import datetime
 
 class IpBgpReport:
@@ -195,7 +196,7 @@ class IpBgpReport:
             path = build_path(self.PATH_TEMPLATES['bgp_instance'].format(
                 network_instance=network_instance
             ))
-            return state.server_data_store.get_data(path, recursive=True)
+            return state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
         except Exception:
             # Silently handle error
             return None
@@ -218,7 +219,7 @@ class IpBgpReport:
                     etag='*',
                     neigh='*'
                 )
-        return state.server_data_store.get_data(path_1, recursive=True)
+        return state.server.get_data_store(DataStore.State).get_data(path_1, recursive=True)
 
     def _getRibRoute2(self, state, netinst, mac_value):
         if state.system_features.bgp_rib_afi_safi_list_for_evpn:
@@ -239,7 +240,7 @@ class IpBgpReport:
                     etag='*',
                     neigh='*'
                 )
-        return state.server_data_store.get_data(path_2, recursive=True)
+        return state.server.get_data_store(DataStore.State).get_data(path_2, recursive=True)
 
     def _getRibRoute3(self, state, netinst, originr_value):
         if state.system_features.bgp_rib_afi_safi_list_for_evpn:
@@ -258,7 +259,7 @@ class IpBgpReport:
                     etag='*',
                     neigh='*'
                 )
-        return state.server_data_store.get_data(path_3, recursive=True)
+        return state.server.get_data_store(DataStore.State).get_data(path_3, recursive=True)
 
     def _getRibRoute4(self, state, netinst, esi4_value):
         if state.system_features.bgp_rib_afi_safi_list_for_evpn:
@@ -277,7 +278,7 @@ class IpBgpReport:
                     orouter='*',
                     neigh='*'
                 )
-        return state.server_data_store.get_data(path_4, recursive=True)
+        return state.server.get_data_store(DataStore.State).get_data(path_4, recursive=True)
 
     def _getRibRoute5(self, state, netinst, ip_value):
         if state.system_features.bgp_rib_afi_safi_list_for_evpn:
@@ -296,7 +297,7 @@ class IpBgpReport:
                 prefix = ip_value,
                 neigh='*'
                 )
-        return state.server_data_store.get_data(path_5, recursive=True)
+        return state.server.get_data_store(DataStore.State).get_data(path_5, recursive=True)
 
     def _has_bgp_config(self, bgp_data):
         """Check if BGP is configured"""
@@ -572,7 +573,7 @@ class IpBgpReport:
         if not attr_id in self._attrSets_dict:
             path_attr = build_path('/network-instance[name={vrf}]/bgp-rib/attr-sets/attr-set[index={atr}]',
                               vrf=netinst_name, atr=str(attr_id))
-            attrSets = state.server_data_store.get_data(path_attr, recursive=True, include_container_children=True)
+            attrSets = state.server.get_data_store(DataStore.State).get_data(path_attr, recursive=True, include_container_children=True)
             self._attrSets_dict[attr_id] = attrSets
         else:
             attrSets = self._attrSets_dict[attr_id]

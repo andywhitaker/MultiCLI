@@ -6,6 +6,7 @@
 
 import datetime
 from srlinux.location import build_path
+from srlinux.schema.data_store import DataStore
 
 class JunosSystemReports:
     """Handles Juniper JUNOS system show commands."""
@@ -19,7 +20,7 @@ class JunosSystemReports:
         # Query system hostname
         path_system = build_path('/system/name/host-name')
         try:
-            data = state.server_data_store.get_data(path_system, recursive=False)
+            data = state.server.get_data_store(DataStore.State).get_data(path_system, recursive=False)
             sys_node = data.system.get()
             if hasattr(sys_node, 'name') and sys_node.name.exists():
                 name_node = sys_node.name.get()
@@ -31,7 +32,7 @@ class JunosSystemReports:
         # Query chassis model
         path_chassis = build_path('/platform/chassis')
         try:
-            data = state.server_data_store.get_data(path_chassis, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path_chassis, recursive=True)
             ch = data.platform.get().chassis.get()
             if hasattr(ch, 'type') and ch.type:
                 model = str(ch.type)
@@ -41,7 +42,7 @@ class JunosSystemReports:
         # Query system version
         sys_info_path = build_path('/system/information')
         try:
-            sys_data = state.server_data_store.get_data(sys_info_path, recursive=True)
+            sys_data = state.server.get_data_store(DataStore.State).get_data(sys_info_path, recursive=True)
             info = sys_data.system.get().information.get()
             if hasattr(info, 'version') and info.version:
                 sw_version = str(info.version).lstrip('v').split('-')[0]
@@ -70,7 +71,7 @@ class JunosSystemReports:
         uptime_seconds = 0
         sys_info_path = build_path('/system/information')
         try:
-            sys_data = state.server_data_store.get_data(sys_info_path, recursive=True)
+            sys_data = state.server.get_data_store(DataStore.State).get_data(sys_info_path, recursive=True)
             info = sys_data.system.get().information.get()
             if hasattr(info, 'last_booted') and info.last_booted:
                 last_booted = str(info.last_booted)
@@ -103,7 +104,7 @@ class JunosSystemReports:
         time_source = "LOCAL CLOCK"
         try:
             ntp_path = build_path('/system/ntp')
-            ntp_data = state.server_data_store.get_data(ntp_path, recursive=True)
+            ntp_data = state.server.get_data_store(DataStore.State).get_data(ntp_path, recursive=True)
             ntp_node = ntp_data.system.get().ntp.get()
             sync_st = getattr(ntp_node, 'synchronization_state', None)
             if sync_st and str(sync_st).lower() in ('synchronized', 'sync'):
@@ -115,7 +116,7 @@ class JunosSystemReports:
         last_cfg_str = f"{boot_str} {ago_str}"
         try:
             cfg_path = build_path('/system/configuration')
-            cfg_data = state.server_data_store.get_data(cfg_path, recursive=True)
+            cfg_data = state.server.get_data_store(DataStore.State).get_data(cfg_path, recursive=True)
             cfg_node = cfg_data.system.get().configuration.get()
             commits = []
             if hasattr(cfg_node, 'commit'):
@@ -167,7 +168,7 @@ class JunosSystemReports:
         serial = "-"
         path_chassis = build_path('/platform/chassis')
         try:
-            data = state.server_data_store.get_data(path_chassis, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path_chassis, recursive=True)
             ch = data.platform.get().chassis.get()
             ch_type = getattr(ch, 'type', '-') or '-'
             serial = getattr(ch, 'serial_number', '-') or '-'
@@ -179,10 +180,10 @@ class JunosSystemReports:
         # Control module
         path_ctrl = build_path('/platform/control[slot=*]')
         try:
-            data_ctrl = state.server_data_store.get_data(path_ctrl, recursive=True)
+            data_ctrl = state.server.get_data_store(DataStore.State).get_data(path_ctrl, recursive=True)
             for c in data_ctrl.platform.get().control.items():
                 slot = getattr(c, 'slot', 'A')
-                c_type = getattr(c, 'type', 'CPM') or 'CPM'
+                c_type = getattr(c, 'type', 'Control Module') or f"Control Card {slot}"
                 c_sn = getattr(c, 'serial_number', '-') or '-'
                 c_part = getattr(c, 'part_number', '-') or '-'
                 lines.append(f"{f'Control Card {slot}':<16} {'':<8} {c_part:<12} {c_sn:<17} {c_type}")
@@ -192,7 +193,7 @@ class JunosSystemReports:
         # Power supplies
         path_psu = build_path('/platform/power-supply[id=*]')
         try:
-            data = state.server_data_store.get_data(path_psu, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path_psu, recursive=True)
             for psu in data.platform.get().power_supply.items():
                 p_id = psu.id
                 oper = getattr(psu, 'oper_state', '-')
@@ -205,7 +206,7 @@ class JunosSystemReports:
         # Fan modules
         path_fan = build_path('/platform/fan-tray[id=*]')
         try:
-            data = state.server_data_store.get_data(path_fan, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path_fan, recursive=True)
             for fan in data.platform.get().fan_tray.items():
                 f_id = fan.id
                 oper = getattr(fan, 'oper_state', '-')

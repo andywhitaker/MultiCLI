@@ -10,6 +10,7 @@ from srlinux.mgmt.cli import KeyCompleter
 import datetime
 import ipaddress
 from srlinux.schema import FixedSchemaRoot
+from srlinux.schema.data_store import DataStore
 
 try:
     from cisco_interface_reports import format_cisco_intf
@@ -83,7 +84,7 @@ class IpRouteReport:
         """Get routes with proper error handling"""
         try:
             routes_path = build_path(self.PATH_TEMPLATES['route_table'].format(network_instance=network_instance))
-            return state.server_data_store.get_data(routes_path, recursive=True)
+            return state.server.get_data_store(DataStore.State).get_data(routes_path, recursive=True)
         except Exception:
             return None
 

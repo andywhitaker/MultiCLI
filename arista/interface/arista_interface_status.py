@@ -14,6 +14,7 @@ This code is a plugin for SR Linux CLI that provides detailed information about 
 from srlinux.data import ColumnFormatter, Data, Borders, ColumnFormatter, Alignment
 from srlinux.location import build_path
 from srlinux.schema import FixedSchemaRoot
+from srlinux.schema.data_store import DataStore
 from srlinux.syntax import Syntax
 
 
@@ -73,7 +74,7 @@ class InterfaceStatus(object):
         except Exception:
             intf_name = '*'
         path = build_path('/interface[name={name}]', name=intf_name)
-        return state.server_data_store.stream_data(path, recursive=False, include_container_children=True)
+        return state.server.get_data_store(DataStore.State).stream_data(path, recursive=False, include_container_children=True)
 
     def _populate_data(self, data, serve_data):
         data.synchronizer.flush_fields(data)

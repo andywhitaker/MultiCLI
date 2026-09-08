@@ -14,6 +14,7 @@ This code is a plugin for SR Linux CLI that provides detailed information about 
 from srlinux.mgmt.cli import CliPlugin, KeyCompleter, MultipleKeyCompleters
 from srlinux.syntax import Syntax
 from srlinux.schema import FixedSchemaRoot
+from srlinux.schema.data_store import DataStore
 from srlinux.location import build_path
 from srlinux import strings
 from srlinux.data import Border, ColumnFormatter, TagValueFormatter, Borders, Data, Indent
@@ -123,7 +124,7 @@ class InterfaceDetails(object):
                 interface_name = '*'
 
         path = build_path('/interface[name={name}]', name=interface_name) 
-        my_data = state.server_data_store.get_data(path, recursive=True, include_container_children=True)
+        my_data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True, include_container_children=True)
 
         for intf in my_data.interface.items():
             interface_name = intf.name

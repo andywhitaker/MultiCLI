@@ -49,36 +49,7 @@ from show_interfaces import JperInterfaceSummary, JperInterfaceBrief, JperInterf
 
 from srlinux.mgmt.cli.lazy_loader_utils import wait_for_show_reports_load
 from srlinux.mgmt.cli.cli_mode import CliMode
-from srlinux.mgmt.cli.cli_state import CliState
-from srlinux.schema.data_store import DataStore
-
-_active_data_store_override = None
-
-_orig_is_intermediate = getattr(CliState, '_orig_multicli_is_intermediate', None)
-if _orig_is_intermediate is None:
-    _orig_is_intermediate = CliState.is_intermediate_command.fget
-    CliState._orig_multicli_is_intermediate = _orig_is_intermediate
-
-    def _multicli_is_intermediate(self):
-        first_cmd = self.first_regular_command_name
-        if first_cmd in ['eos', 'nxos', 'junos']:
-            return not self.is_last_command
-        return _orig_is_intermediate(self)
-
-    CliState.is_intermediate_command = property(_multicli_is_intermediate)
-
-_orig_server_data_store = getattr(CliState, '_orig_multicli_server_data_store', None)
-if _orig_server_data_store is None:
-    _orig_server_data_store = CliState.server_data_store.fget
-    CliState._orig_multicli_server_data_store = _orig_server_data_store
-
-    def _multicli_server_data_store(self):
-        global _active_data_store_override
-        if _active_data_store_override is not None:
-            return _active_data_store_override
-        return _orig_server_data_store(self)
-
-    CliState.server_data_store = property(_multicli_server_data_store)
+import os
 
 def _enter_submode(state, arguments):
     if state.is_last_command:
@@ -114,29 +85,15 @@ class Plugin(CliPlugin):
             return parent.root.get_command_or_none(name)
         return None
 
-    def _wrap_callback(self, callback):
-        if not callback:
-            return None
-        def wrapped(state, *args, **kwargs):
-            if state.is_intermediate_command:
-                return
-            global _active_data_store_override
-            _active_data_store_override = state.server.get_data_store(DataStore.State)
-            try:
-                return callback(state, *args, **kwargs)
-            finally:
-                _active_data_store_override = None
-        return wrapped
-
     def _add_or_override(self, parent, syntax, callback=None, schema=None, update_location=False):
         node = self._get_child(parent, syntax.name)
         if node:
             if callback:
-                node.set_callback(self._wrap_callback(callback))
+                node.set_callback(callback)
             return node
         kwargs = {'update_location': update_location}
         if callback is not None:
-            kwargs['callback'] = self._wrap_callback(callback)
+            kwargs['callback'] = callback
         if schema is not None:
             kwargs['schema'] = schema
         return parent.add_command(syntax, **kwargs)
@@ -276,7 +233,7 @@ class Plugin(CliPlugin):
         JunosSystemReports().show_chassis_hardware(state, output)
 
     def _print_system_processes(self, state, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         JunosSystemReports().show_system_processes(state, output, summary=False)
 
@@ -284,22 +241,22 @@ class Plugin(CliPlugin):
         JunosSystemReports().show_system_processes(state, output, summary=True)
 
     def _interface_summary(self, state, arguments, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         JperInterfaceSummary().print(state, arguments, output, **_kwargs)
 
     def _interface_brief(self, state, arguments, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         JperInterfaceBrief().print(state, arguments, output, **_kwargs)
 
     def _interface_terse(self, state, arguments, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         JperInterfaceTerse().print(state, arguments, output, **_kwargs)
 
     def _print_arp(self, state, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         JunosRoutingReports().show_arp_no_resolve(state, output)
 
@@ -313,12 +270,12 @@ class Plugin(CliPlugin):
         JunosRoutingReports().show_lacp_interfaces(state, output)
 
     def _show_ethernet_switching_table(self, state, arguments, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         EthernetSwitchingReport()._show_table_instance(state, output, arguments, **_kwargs)
 
     def _print_route(self, state, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         JunosRoutingReports().show_route(state, output)
 

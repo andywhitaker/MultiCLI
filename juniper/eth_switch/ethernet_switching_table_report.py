@@ -17,6 +17,7 @@ from srlinux.mgmt.cli.cli_loader import CliLoader
 from srlinux.mgmt.cli.cli_output import CliOutput
 from srlinux.mgmt.cli.cli_state import CliState
 from srlinux.schema import FixedSchemaRoot
+from srlinux.schema.data_store import DataStore
 from srlinux.data.utilities import Percentage, print_line, Width
 import itertools
 from srlinux import strings
@@ -83,14 +84,14 @@ class EthernetSwitchingReport:
             '/network-instance[name={name}]',
             name=netinst_name
         )
-        return self._state.server_data_store.get_data(table_path, recursive=False)
+        return self._state.server.get_data_store(DataStore.State).get_data(table_path, recursive=False)
 
     def _fetch_state_network_interfaces(self, netinst_name):
         table_path = build_path(
             '/network-instance[name={name}]/interface[name=*]',
             name=netinst_name
         )
-        return self._state.server_data_store.get_data(table_path, recursive=False, include_container_children=True)
+        return self._state.server.get_data_store(DataStore.State).get_data(table_path, recursive=False, include_container_children=True)
 
     def _fetch_state_mac_table(self, netinst_name, mac_address=None):
         table_path = build_path(
@@ -98,14 +99,14 @@ class EthernetSwitchingReport:
             name=netinst_name,
             mac=mac_address or '*'
         )
-        return self._state.server_data_store.stream_data(table_path, recursive=True)
+        return self._state.server.get_data_store(DataStore.State).stream_data(table_path, recursive=True)
 
     def _fetch_state_mac_table_stats(self, netinst_name):
         table_path = build_path(
             '/network-instance[name={name}]/bridge-table/statistics',
             name=netinst_name
         )
-        return self._state.server_data_store.stream_data(table_path, recursive=False, include_container_children=True)
+        return self._state.server.get_data_store(DataStore.State).stream_data(table_path, recursive=False, include_container_children=True)
 
     def _fetch_state_subinterface(self, int_name, subint_index):
         table_path = build_path(
@@ -113,14 +114,14 @@ class EthernetSwitchingReport:
             name=int_name,
             index=str(subint_index)
         )
-        return self._state.server_data_store.get_data(table_path, recursive=True, include_container_children=True)
+        return self._state.server.get_data_store(DataStore.State).get_data(table_path, recursive=True, include_container_children=True)
 
     def _fetch_state_int_hw_mac(self, int_name):
         table_path = build_path(
             '/interface[name={name}]/ethernet/hw-mac-address',
             name=int_name
         )
-        return self._state.server_data_store.stream_data(table_path, recursive=False, include_container_children=True)
+        return self._state.server.get_data_store(DataStore.State).stream_data(table_path, recursive=False, include_container_children=True)
 
     def _fetch_state_irb_subinterface_anycast_mac(self, int_name, subint_index):
         table_path = build_path(
@@ -128,7 +129,7 @@ class EthernetSwitchingReport:
             name=int_name,
             index=str(subint_index)
         )
-        return self._state.server_data_store.stream_data(table_path, recursive=False, include_container_children=True)
+        return self._state.server.get_data_store(DataStore.State).stream_data(table_path, recursive=False, include_container_children=True)
 
     def _get_interface_name_index_from_netinstance_data(self, network_interface_data ):
         interface_name_index_list=[]

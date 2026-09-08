@@ -6,6 +6,7 @@
 
 import re
 from srlinux.location import build_path
+from srlinux.schema.data_store import DataStore
 
 def format_cisco_intf(name, short=True):
     """Format SR Linux interface name to Cisco NX-OS format."""
@@ -98,7 +99,7 @@ class CiscoInterfaceReports:
 
         path = build_path('/interface[name=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for intf in data.interface.items():
                 name = intf.name
                 admin = getattr(intf, 'admin_state', 'disable')
@@ -240,7 +241,7 @@ class CiscoInterfaceReports:
         rows = []
         path = build_path('/interface[name=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for intf in data.interface.items():
                 try:
                     name = intf.name
@@ -354,7 +355,7 @@ class CiscoInterfaceReports:
         rows = []
         path = build_path('/interface[name=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for intf in data.interface.items():
                 name = intf.name
                 c_name = format_cisco_intf(name, short=True)
@@ -407,7 +408,7 @@ class CiscoInterfaceReports:
         path = build_path('/interface[name=lag*]')
         found = False
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for intf in data.interface.items():
                 name = intf.name
                 found = True
@@ -454,7 +455,7 @@ class CiscoInterfaceReports:
         path = build_path('/interface[name=*]/transceiver')
         rows = []
         try:
-            data = state.server_data_store.get_data(path, recursive=True, include_container_children=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True, include_container_children=True)
             for intf in data.interface.items():
                 name = intf.name
                 if not hasattr(intf, 'transceiver') or not intf.transceiver.exists():
@@ -562,7 +563,7 @@ class CiscoInterfaceReports:
         intf_to_vrf = {}
         try:
             ni_p = build_path('/network-instance[name=*]/interface[name=*]')
-            ni_d = state.server_data_store.get_data(ni_p, recursive=False)
+            ni_d = state.server.get_data_store(DataStore.State).get_data(ni_p, recursive=False)
             for ni in ni_d.network_instance.items():
                 if hasattr(ni, 'interface'):
                     for i in ni.interface.items():
@@ -572,7 +573,7 @@ class CiscoInterfaceReports:
 
         path = build_path('/interface[name=*]/subinterface[index=*]/ipv6/address[ip-prefix=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for intf in data.interface.items():
                 name = intf.name
                 disp_port = format_cisco_intf(name, short=True)
@@ -619,7 +620,7 @@ class CiscoInterfaceReports:
 
         path = build_path('/interface[name={name}]', name=target_name)
         try:
-            data = state.server_data_store.get_data(path, recursive=True, include_container_children=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True, include_container_children=True)
         except Exception:
             return
 

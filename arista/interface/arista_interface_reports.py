@@ -9,6 +9,7 @@
 import datetime
 import re
 from srlinux.location import build_path
+from srlinux.schema.data_store import DataStore
 
 def format_mac_cisco_arista(mac_str):
     if not mac_str:
@@ -85,7 +86,7 @@ class AristaInterfaceReports:
         
         path = build_path('/interface[name=*]')
         try:
-            intf_data = state.server_data_store.get_data(path, recursive=True)
+            intf_data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for intf in intf_data.interface.items():
                 intf_name = intf.name
                 parent_admin = getattr(intf, 'admin_state', 'disable')
@@ -157,7 +158,7 @@ class AristaInterfaceReports:
         rows = []
         path = build_path('/interface[name=*]')
         try:
-            intf_data = state.server_data_store.get_data(path, recursive=False)
+            intf_data = state.server.get_data_store(DataStore.State).get_data(path, recursive=False)
             for intf in intf_data.interface.items():
                 name = intf.name
                 admin_state = getattr(intf, 'admin_state', 'disable')
@@ -194,7 +195,7 @@ class AristaInterfaceReports:
 
         try:
             lldp_sys_path = build_path('/system/lldp')
-            lldp_sys_data = state.server_data_store.get_data(lldp_sys_path, recursive=False)
+            lldp_sys_data = state.server.get_data_store(DataStore.State).get_data(lldp_sys_path, recursive=False)
             lldp_node = lldp_sys_data.system.get().lldp.get()
             hello = getattr(lldp_node, 'hello_timer', 30) or 30
             multiplier = getattr(lldp_node, 'hold_multiplier', 4) or 4
@@ -208,7 +209,7 @@ class AristaInterfaceReports:
 
         path = build_path('/system/lldp/interface[name=*]/neighbor[id=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for iface in data.get_descendants('/system/lldp/interface'):
                 local_name = getattr(iface, 'name', '')
                 if hasattr(iface, 'neighbor'):
@@ -290,7 +291,7 @@ class AristaInterfaceReports:
         ]
         path = build_path('/interface[name=*]/subinterface[index=*]/ipv4/arp/neighbor[ipv4-address=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for intf in data.interface.items():
                 if hasattr(intf, 'subinterface'):
                     for sub in intf.subinterface.items():
@@ -348,7 +349,7 @@ class AristaInterfaceReports:
         lags = []
         path = build_path('/interface[name=lag*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for lag in data.interface.items():
                 lag_name = lag.name
                 oper = getattr(lag, 'oper_state', 'down')
@@ -402,7 +403,7 @@ class AristaInterfaceReports:
         path = build_path('/interface[name=*]/transceiver')
         rows = []
         try:
-            data = state.server_data_store.get_data(path, recursive=True, include_container_children=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True, include_container_children=True)
             for intf in data.interface.items():
                 name = intf.name
                 if not hasattr(intf, 'transceiver') or not intf.transceiver.exists():

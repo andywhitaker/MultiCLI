@@ -10,6 +10,7 @@ import re
 from srlinux.location import build_path
 from srlinux.data import ColumnFormatter, Data, Borders, Alignment, Border
 from srlinux.schema import FixedSchemaRoot
+from srlinux.schema.data_store import DataStore
 
 # Add interface directory to sys.path if not present
 interface_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'interface'))
@@ -83,11 +84,11 @@ class IpInterfaceReport:
     def _fetch_state(self, state):
         # Get interface data with recursive=True to get all nested data including IP addresses
         interface_path = build_path('/interface[name=*]')
-        self.interface_data = state.server_data_store.get_data(interface_path, recursive=True)
+        self.interface_data = state.server.get_data_store(DataStore.State).get_data(interface_path, recursive=True)
         
         # Get network-instance interface mapping
         ni_path = build_path('/network-instance[name=*]/interface[name=*]')
-        self.ni_data = state.server_data_store.get_data(ni_path, recursive=True)
+        self.ni_data = state.server.get_data_store(DataStore.State).get_data(ni_path, recursive=True)
     
     def _get_interface_vrf(self, interface_name):
         # Normalize interface name for matching

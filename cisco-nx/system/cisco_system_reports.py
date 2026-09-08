@@ -6,6 +6,7 @@
 
 import datetime
 from srlinux.location import build_path
+from srlinux.schema.data_store import DataStore
 
 class CiscoSystemReports:
     """Handles Cisco NX-OS system-level show commands."""
@@ -24,7 +25,7 @@ class CiscoSystemReports:
         # Query platform / chassis info
         path_chassis = build_path('/platform/chassis')
         try:
-            data = state.server_data_store.get_data(path_chassis, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path_chassis, recursive=True)
             ch = data.platform.get().chassis.get()
             if hasattr(ch, 'serial_number') and ch.serial_number:
                 serial = str(ch.serial_number)
@@ -38,7 +39,7 @@ class CiscoSystemReports:
         # Query system information (version, uptime)
         sys_info_path = build_path('/system/information')
         try:
-            sys_data = state.server_data_store.get_data(sys_info_path, recursive=True)
+            sys_data = state.server.get_data_store(DataStore.State).get_data(sys_info_path, recursive=True)
             info = sys_data.system.get().information.get()
             if hasattr(info, 'version') and info.version:
                 sw_version = str(info.version)
@@ -52,7 +53,7 @@ class CiscoSystemReports:
         # Query control / memory info
         path_control = build_path('/platform/control[slot=*]')
         try:
-            data = state.server_data_store.get_data(path_control, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path_control, recursive=True)
             for ctrl in data.platform.get().control.items():
                 if hasattr(ctrl, 'memory') and ctrl.memory.exists():
                     mem = ctrl.memory.get()
@@ -66,7 +67,7 @@ class CiscoSystemReports:
         # Query system hostname
         path_system = build_path('/system/name/host-name')
         try:
-            data = state.server_data_store.get_data(path_system, recursive=False)
+            data = state.server.get_data_store(DataStore.State).get_data(path_system, recursive=False)
             sys_node = data.system.get()
             if hasattr(sys_node, 'name') and sys_node.name.exists():
                 name_node = sys_node.name.get()
@@ -121,7 +122,7 @@ class CiscoSystemReports:
         hostname = "-"
         path_system = build_path('/system/name/host-name')
         try:
-            data = state.server_data_store.get_data(path_system, recursive=False)
+            data = state.server.get_data_store(DataStore.State).get_data(path_system, recursive=False)
             sys_node = data.system.get()
             if hasattr(sys_node, 'name') and sys_node.name.exists():
                 name_node = sys_node.name.get()
@@ -149,7 +150,7 @@ class CiscoSystemReports:
         # Chassis
         path_chassis = build_path('/platform/chassis')
         try:
-            data = state.server_data_store.get_data(path_chassis, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path_chassis, recursive=True)
             ch = data.platform.get().chassis.get()
             ch_type = getattr(ch, 'type', None)
             serial = getattr(ch, 'serial_number', None)
@@ -162,7 +163,7 @@ class CiscoSystemReports:
         # Power supplies
         path_psu = build_path('/platform/power-supply[id=*]')
         try:
-            data = state.server_data_store.get_data(path_psu, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path_psu, recursive=True)
             for psu in data.platform.get().power_supply.items():
                 p_id = psu.id
                 p_type = getattr(psu, 'type', None)
@@ -176,7 +177,7 @@ class CiscoSystemReports:
         # Fan modules
         path_fan = build_path('/platform/fan-tray[id=*]')
         try:
-            data = state.server_data_store.get_data(path_fan, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path_fan, recursive=True)
             for fan in data.platform.get().fan_tray.items():
                 f_id = fan.id
                 f_sn = getattr(fan, 'serial_number', None)
@@ -207,7 +208,7 @@ class CiscoSystemReports:
             path_temp = build_path('/platform/control[slot=*]/temperature[sensor-name=*]')
             found_temp = False
             try:
-                data = state.server_data_store.get_data(path_temp, recursive=True)
+                data = state.server.get_data_store(DataStore.State).get_data(path_temp, recursive=True)
                 for ctrl in data.platform.control.items():
                     slot = ctrl.slot
                     if hasattr(ctrl, 'temperature'):
@@ -232,7 +233,7 @@ class CiscoSystemReports:
             path_psu = build_path('/platform/power-supply[id=*]')
             found_psu = False
             try:
-                data = state.server_data_store.get_data(path_psu, recursive=True)
+                data = state.server.get_data_store(DataStore.State).get_data(path_psu, recursive=True)
                 for psu in data.platform.power_supply.items():
                     p_id = psu.id
                     p_type = getattr(psu, 'type', '-')
@@ -256,7 +257,7 @@ class CiscoSystemReports:
             path_fan = build_path('/platform/fan-tray[id=*]')
             found_fan = False
             try:
-                data = state.server_data_store.get_data(path_fan, recursive=True)
+                data = state.server.get_data_store(DataStore.State).get_data(path_fan, recursive=True)
                 for fan in data.platform.fan_tray.items():
                     f_id = fan.id
                     oper = getattr(fan, 'oper_state', '-')
@@ -282,7 +283,7 @@ class CiscoSystemReports:
 
         num_ports = 0
         try:
-            intf_data = state.server_data_store.get_data(build_path('/interface[name=*]'), recursive=True)
+            intf_data = state.server.get_data_store(DataStore.State).get_data(build_path('/interface[name=*]'), recursive=True)
             num_ports = sum(1 for i in intf_data.interface.items() if i.name.startswith('ethernet-'))
         except Exception:
             num_ports = 0
@@ -290,7 +291,7 @@ class CiscoSystemReports:
 
         sw_version = "--"
         try:
-            sys_info = state.server_data_store.get_data(build_path('/system/information'), recursive=True)
+            sys_info = state.server.get_data_store(DataStore.State).get_data(build_path('/system/information'), recursive=True)
             info = sys_info.system.get().information.get()
             if hasattr(info, 'version') and info.version:
                 sw_version = str(info.version)
@@ -300,7 +301,7 @@ class CiscoSystemReports:
         serial = "--"
         mac = "--"
         try:
-            ch_data = state.server_data_store.get_data(build_path('/platform/chassis'), recursive=True)
+            ch_data = state.server.get_data_store(DataStore.State).get_data(build_path('/platform/chassis'), recursive=True)
             ch = ch_data.platform.get().chassis.get()
             if hasattr(ch, 'serial_number') and ch.serial_number:
                 serial = str(ch.serial_number)
@@ -310,7 +311,7 @@ class CiscoSystemReports:
             pass
 
         try:
-            lc_data = state.server_data_store.get_data(linecard_path, recursive=True)
+            lc_data = state.server.get_data_store(DataStore.State).get_data(linecard_path, recursive=True)
             for lc in lc_data.platform.get().linecard.items():
                 slot = getattr(lc, 'slot', '1')
                 model = getattr(lc, 'type', '') or getattr(lc, 'part_number', 'Linecard')
@@ -332,7 +333,7 @@ class CiscoSystemReports:
 
         if not modules:
             try:
-                ctrl_data = state.server_data_store.get_data(ctrl_path, recursive=True)
+                ctrl_data = state.server.get_data_store(DataStore.State).get_data(ctrl_path, recursive=True)
                 for c in ctrl_data.platform.get().control.items():
                     slot = getattr(c, 'slot', '1')
                     model = getattr(c, 'type', '') or getattr(c, 'part_number', 'Control')
@@ -382,7 +383,7 @@ class CiscoSystemReports:
 
         path_cpu = build_path('/platform/control[slot=*]/cpu[index=all]/total')
         try:
-            cpu_data = state.server_data_store.get_data(path_cpu, recursive=True)
+            cpu_data = state.server.get_data_store(DataStore.State).get_data(path_cpu, recursive=True)
             for ctrl in cpu_data.platform.get().control.items():
                 if hasattr(ctrl, 'cpu'):
                     for cpu_obj in ctrl.cpu.items():

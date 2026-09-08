@@ -9,6 +9,7 @@
 import ipaddress
 import re
 from srlinux.location import build_path
+from srlinux.schema.data_store import DataStore
 
 def format_mac_cisco_arista(mac_str):
     if not mac_str:
@@ -78,7 +79,7 @@ class AristaRoutingReports:
 
         try:
             rt_path = build_path('/network-instance[name={name}]/route-table', name=vrf)
-            rt_data = state.server_data_store.get_data(rt_path, recursive=True)
+            rt_data = state.server.get_data_store(DataStore.State).get_data(rt_path, recursive=True)
 
             # Build next-hop index to IP/interface mapping
             for nh in rt_data.get_descendants('/network-instance/route-table/next-hop'):
@@ -215,7 +216,7 @@ class AristaRoutingReports:
         rd_by_ni = {}
         try:
             bv_p = build_path('/network-instance[name=*]/protocols/bgp-vpn')
-            bv_data = state.server_data_store.get_data(bv_p, recursive=True)
+            bv_data = state.server.get_data_store(DataStore.State).get_data(bv_p, recursive=True)
             for ni in bv_data.network_instance.items():
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
                     p_obj = ni.protocols.get()
@@ -238,7 +239,7 @@ class AristaRoutingReports:
         intfs_by_ni = {}
         try:
             intf_p = build_path('/network-instance[name=*]/interface[name=*]')
-            intf_data = state.server_data_store.get_data(intf_p, recursive=False)
+            intf_data = state.server.get_data_store(DataStore.State).get_data(intf_p, recursive=False)
             for ni in intf_data.network_instance.items():
                 if hasattr(ni, 'interface'):
                     intfs_by_ni[ni.name] = [format_arista_intf(intf.name, short=False) for intf in ni.interface.items()]
@@ -247,7 +248,7 @@ class AristaRoutingReports:
 
         path = build_path('/network-instance[name=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=False)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=False)
             for ni in sorted(data.network_instance.items(), key=lambda x: str(x.name)):
                 try:
                     name = ni.name
@@ -295,7 +296,7 @@ class AristaRoutingReports:
                 p_name, sub_idx = intf_name.split('.', 1)
                 try:
                     p = build_path(f'/interface[name={p_name}]/subinterface[index={sub_idx}]/vlan/encap/single-tagged/vlan-id')
-                    d = state.server_data_store.get_data(p, recursive=False)
+                    d = state.server.get_data_store(DataStore.State).get_data(p, recursive=False)
                     vlan_val = getattr(d.interface.get().subinterface.get().vlan.get().encap.get().single_tagged.get(), 'vlan_id', None)
                     if vlan_val is not None:
                         return str(vlan_val)
@@ -328,7 +329,7 @@ class AristaRoutingReports:
         raw_intfs_by_ni = {}
         try:
             intf_p = build_path('/network-instance[name=*]/interface[name=*]')
-            intf_data = state.server_data_store.get_data(intf_p, recursive=False)
+            intf_data = state.server.get_data_store(DataStore.State).get_data(intf_p, recursive=False)
             for ni in intf_data.network_instance.items():
                 if hasattr(ni, 'interface'):
                     raw_intfs_by_ni[ni.name] = [intf.name for intf in ni.interface.items()]
@@ -338,7 +339,7 @@ class AristaRoutingReports:
 
         path = build_path('/network-instance[name=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=False)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=False)
             for ni in sorted(data.network_instance.items(), key=lambda x: str(x.name)):
                 ni_type = getattr(ni, 'type', '')
                 if ni_type != 'mac-vrf':
@@ -372,7 +373,7 @@ class AristaRoutingReports:
         ports_by_ni = {}
         try:
             intf_p = build_path('/network-instance[name=*]/interface[name=*]')
-            intf_data = state.server_data_store.get_data(intf_p, recursive=False)
+            intf_data = state.server.get_data_store(DataStore.State).get_data(intf_p, recursive=False)
             for ni in intf_data.network_instance.items():
                 if hasattr(ni, 'interface'):
                     raw_ports = [intf.name for intf in ni.interface.items()]
@@ -383,7 +384,7 @@ class AristaRoutingReports:
 
         path = build_path('/network-instance[name=*]/bridge-table/mac-table/mac[address=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for ni in getattr(data, 'network_instance', []).items() if hasattr(data, 'network_instance') else []:
                 ni_name = ni.name
                 ni_vlan = vlan_by_ni.get(ni_name, "--")
@@ -427,7 +428,7 @@ class AristaRoutingReports:
         path = build_path('/network-instance[name=*]/protocols/ospf/instance[name=*]/area[area-id=*]/interface[interface-name=*]/neighbor[router-id=*]')
         found = False
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for ni in data.network_instance.items():
                 vrf = ni.name
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
@@ -477,7 +478,7 @@ class AristaRoutingReports:
         path = build_path('/network-instance[name=*]/protocols/isis/instance[name=*]/interface[interface-name=*]/adjacency[neighbor-system-id=*][adjacency-level=*]')
         found = False
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for ni in data.network_instance.items():
                 vrf = ni.name
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
@@ -517,7 +518,7 @@ class AristaRoutingReports:
         intf_ip_map = {}
         try:
             intf_path = build_path('/interface[name=*]/subinterface[index=*]/ipv4/address')
-            intf_data = state.server_data_store.get_data(intf_path, recursive=False)
+            intf_data = state.server.get_data_store(DataStore.State).get_data(intf_path, recursive=False)
             for intf in intf_data.interface.items():
                 if hasattr(intf, 'subinterface'):
                     for sub in intf.subinterface.items():
@@ -535,7 +536,7 @@ class AristaRoutingReports:
         path = build_path('/network-instance[name=*]/protocols/ospf/instance[name=*]/area[area-id=*]/interface[interface-name=*]')
         found = False
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for ni in data.network_instance.items():
                 vrf = ni.name
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
@@ -576,7 +577,7 @@ class AristaRoutingReports:
         path = build_path('/system/network-instance/protocols/evpn/ethernet-segments')
         found = False
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             # Check for EVPN MH / ESI
             es_container = getattr(data.system.get().network_instance.get().protocols.get().evpn.get(), 'ethernet_segments', None)
             if es_container and hasattr(es_container.get(), 'bgp_instance'):

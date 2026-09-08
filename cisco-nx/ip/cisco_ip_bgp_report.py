@@ -5,6 +5,7 @@ Author: Alperen Akpinar
 from srlinux.syntax import Syntax
 from srlinux.location import build_path
 from srlinux.mgmt.cli import KeyCompleter
+from srlinux.schema.data_store import DataStore
 import datetime
 
 class IpBgpReport:
@@ -57,7 +58,7 @@ class IpBgpReport:
             path = build_path(self.PATH_TEMPLATES['bgp_instance'].format(
                 network_instance=network_instance
             ))
-            return state.server_data_store.get_data(path, recursive=True)
+            return state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
         except Exception:
             # Silently handle error
             return None

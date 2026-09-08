@@ -7,6 +7,7 @@
 
 from srlinux.mgmt.cli.execute_error import ExecuteError
 from srlinux.schema import FixedSchemaRoot
+from srlinux.schema.data_store import DataStore
 from srlinux.location import build_path
 from srlinux.data import Data, ColumnFormatter, TagValueFormatter, Formatter
 from srlinux.mgmt.server.server_error import ServerError
@@ -133,7 +134,7 @@ class EvpnDestinationReport(object):
 
         try:
             self._chassis_type = (
-                state.server_data_store.get_data(chassis_type_path, recursive=False)
+                state.server.get_data_store(DataStore.State).get_data(chassis_type_path, recursive=False)
                 .platform.get()
                 .chassis.get()
                 .type
@@ -147,32 +148,45 @@ class EvpnDestinationReport(object):
         if self._chassis_type.startswith("7220"):
             self._fetch_state_vxlan(state, arguments)
 
+    def _get_service_name(self, state, arguments):
+        if arguments and hasattr(arguments, 'has_node') and arguments.has_node('id'):
+            val = arguments.get_value_or('id', 'name', '*')
+            if val:
+                return val
+        if state and hasattr(state, 'line_commands') and state.line_commands:
+            if hasattr(state.line_commands, 'has_node') and state.line_commands.has_node('id'):
+                val = state.line_commands.get_value_or('id', 'name', '*')
+                if val:
+                    return val
+        return '*'
+
     def _fetch_state_mpls(self, state, arguments):
+        service_name = self._get_service_name(state, arguments)
         mpls_multicast_destinations_path = build_path(
             "/network-instance[name={netinst_name}]/protocols/bgp-evpn/bgp-instance[id=*]/mpls/bridge-table/multicast-destinations",
-            netinst_name=arguments.get("id", "name"),
+            netinst_name=service_name,
         )
 
         mpls_unicast_destinations_path = build_path(
             "/network-instance[name={netinst_name}]/protocols/bgp-evpn/bgp-instance[id=*]/mpls/bridge-table/unicast-destinations",
-            netinst_name=arguments.get("id", "name"),
+            netinst_name=service_name,
         )
 
         route_table_path = build_path(
             "/network-instance[name={netinst_name}]/route-table",
-            netinst_name=arguments.get("id", "name"),
+            netinst_name=service_name,
         )
 
         try:
-            self._mpls_multicast_destinations_data = state.server_data_store.get_data(
+            self._mpls_multicast_destinations_data = state.server.get_data_store(DataStore.State).get_data(
                 mpls_multicast_destinations_path, recursive=True
             )
 
-            self._mpls_unicast_destinations_data = state.server_data_store.get_data(
+            self._mpls_unicast_destinations_data = state.server.get_data_store(DataStore.State).get_data(
                 mpls_unicast_destinations_path, recursive=True
             )
 
-            self._route_table_data = state.server_data_store.get_data(
+            self._route_table_data = state.server.get_data_store(DataStore.State).get_data(
                 route_table_path, recursive=True
             )
         except ServerError as e:
@@ -182,19 +196,20 @@ class EvpnDestinationReport(object):
             self._route_table_data = None
 
     def _fetch_state_vxlan(self, state, arguments):
+        service_name = self._get_service_name(state, arguments)
         vxlan_interface_path = build_path(
             "/network-instance[name={netinst_name}]/vxlan-interface",
-            netinst_name=arguments.get("id", "name"),
+            netinst_name=service_name,
         )
 
         tunnel_interface_path = build_path("/tunnel-interface")
 
         try:
-            self._vxlan_interface_data = state.server_data_store.get_data(
+            self._vxlan_interface_data = state.server.get_data_store(DataStore.State).get_data(
                 vxlan_interface_path, recursive=True
             )
 
-            self._tunnel_interface_data = state.server_data_store.get_data(
+            self._tunnel_interface_data = state.server.get_data_store(DataStore.State).get_data(
                 tunnel_interface_path, recursive=True
             )
         except ServerError as e:

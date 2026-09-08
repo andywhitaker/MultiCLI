@@ -47,6 +47,7 @@ if [ -z "$DEFAULT_PERSONA" ]; then
         *leaf1*) DEFAULT_PERSONA="arista" ;;
         *leaf2*) DEFAULT_PERSONA="cisco" ;;
         *leaf3*) DEFAULT_PERSONA="juniper" ;;
+        *leaf4*) DEFAULT_PERSONA="nokia" ;;
         *) DEFAULT_PERSONA="arista" ;;
     esac
 fi
@@ -122,7 +123,7 @@ done
 echo "==> Configuring node '$TARGET_NODE' with MultiCLI [${VENDORS[*]}] (default persona: $DEFAULT_PERSONA)..."
 
 if [ "$USE_DOCKER_CP" = true ]; then
-    docker exec "$TARGET_NODE" bash -c 'rm -rf /etc/opt/srlinux/cli/plugins/{main_{arista,cisco,juniper}.py,ip_reports.py,mac_reports.py,Cisco_nxos_lldp_neighbor,ethernet_switching_reports.py,show_interfaces.py,sros_bgp_report.py,service_report.py,sros_router_report.py} /etc/opt/srlinux/cli/{system,routing,interface,ip,mac,eth_switch,bgp,evpn,README.md} 2>/dev/null || true; find /etc/opt/srlinux/cli -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true; mkdir -p /etc/opt/srlinux/cli/plugins'
+    docker exec "$TARGET_NODE" bash -c 'rm -rf /etc/opt/srlinux/cli/plugins/{main_{arista,cisco,juniper,nokia}.py,ip_reports.py,mac_reports.py,Cisco_nxos_lldp_neighbor,ethernet_switching_reports.py,show_interfaces.py,sros_bgp_report.py,service_report.py,sros_router_report.py} /etc/opt/srlinux/cli/{system,routing,interface,ip,mac,eth_switch,bgp,evpn,service,README.md} 2>/dev/null || true; find /etc/opt/srlinux/cli -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true; mkdir -p /etc/opt/srlinux/cli/plugins'
     for v in "${VENDORS[@]}"; do
         docker cp "$SCRIPT_DIR/$v"/. "$TARGET_NODE":/etc/opt/srlinux/cli/
     done
@@ -130,7 +131,7 @@ if [ "$USE_DOCKER_CP" = true ]; then
     echo "==> Successfully installed [${VENDORS[*]}] to $TARGET_NODE via docker cp."
 else
     mkdir -p "$TARGET_CLI_DIR"/plugins
-    rm -rf "$TARGET_CLI_DIR"/plugins/{main_{arista,cisco,juniper}.py,ip_reports.py,mac_reports.py,Cisco_nxos_lldp_neighbor,ethernet_switching_reports.py,show_interfaces.py,sros_bgp_report.py,service_report.py,sros_router_report.py} "$TARGET_CLI_DIR"/{system,routing,interface,ip,mac,eth_switch,bgp,evpn,README.md} 2>/dev/null || true
+    rm -rf "$TARGET_CLI_DIR"/plugins/{main_{arista,cisco,juniper,nokia}.py,ip_reports.py,mac_reports.py,Cisco_nxos_lldp_neighbor,ethernet_switching_reports.py,show_interfaces.py,sros_bgp_report.py,service_report.py,sros_router_report.py} "$TARGET_CLI_DIR"/{system,routing,interface,ip,mac,eth_switch,bgp,evpn,service,README.md} 2>/dev/null || true
     find "$TARGET_CLI_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
     mkdir -p "$TARGET_CLI_DIR"/plugins
     for v in "${VENDORS[@]}"; do

@@ -7,6 +7,7 @@
 import datetime
 import re
 from srlinux.location import build_path
+from srlinux.schema.data_store import DataStore
 from cisco_interface_reports import format_cisco_intf
 
 def format_mac_cisco(mac):
@@ -27,7 +28,7 @@ class CiscoRoutingReports:
         ]
         path = build_path('/network-instance[name=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=False)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=False)
             vrf_id = 1
             for ni in sorted(data.network_instance.items(), key=lambda x: str(x.name)):
                 name = ni.name
@@ -55,7 +56,7 @@ class CiscoRoutingReports:
                 p_name, sub_idx = intf_name.split('.', 1)
                 try:
                     p = build_path(f'/interface[name={p_name}]/subinterface[index={sub_idx}]/vlan/encap/single-tagged/vlan-id')
-                    d = state.server_data_store.get_data(p, recursive=False)
+                    d = state.server.get_data_store(DataStore.State).get_data(p, recursive=False)
                     vlan_val = getattr(d.interface.get().subinterface.get().vlan.get().encap.get().single_tagged.get(), 'vlan_id', None)
                     if vlan_val is not None:
                         return str(vlan_val)
@@ -88,7 +89,7 @@ class CiscoRoutingReports:
         vlan_by_ni = {}
         try:
             intf_p = build_path('/network-instance[name=*]/interface[name=*]')
-            intf_data = state.server_data_store.get_data(intf_p, recursive=False)
+            intf_data = state.server.get_data_store(DataStore.State).get_data(intf_p, recursive=False)
             for ni in intf_data.network_instance.items():
                 if hasattr(ni, 'interface'):
                     raw_ports = [intf.name for intf in ni.interface.items()]
@@ -99,7 +100,7 @@ class CiscoRoutingReports:
 
         path = build_path('/network-instance[name=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=False)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=False)
             for ni in sorted(data.network_instance.items(), key=lambda x: str(x.name)):
                 ni_type = getattr(ni, 'type', '')
                 if ni_type != 'mac-vrf':
@@ -128,7 +129,7 @@ class CiscoRoutingReports:
         found = False
         try:
             path_arpnd = build_path('/interface[name=*]/subinterface[index=*]/ipv4/arp/neighbor[ipv4-address=*]')
-            data_arpnd = state.server_data_store.get_data(path_arpnd, recursive=True)
+            data_arpnd = state.server.get_data_store(DataStore.State).get_data(path_arpnd, recursive=True)
             for intf in data_arpnd.interface.items():
                 if hasattr(intf, 'subinterface'):
                     for sub in intf.subinterface.items():
@@ -171,7 +172,7 @@ class CiscoRoutingReports:
         if not found:
             try:
                 path = build_path('/network-instance[name=*]/neighbor[ipv4-address=*]')
-                data = state.server_data_store.get_data(path, recursive=True)
+                data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
                 for ni in data.network_instance.items():
                     if hasattr(ni, 'neighbor'):
                         for n in ni.neighbor.items():
@@ -198,7 +199,7 @@ class CiscoRoutingReports:
         path = build_path('/bfd/network-instance[name=*]/peer[local-discriminator=*]')
         found = False
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for ni in data.bfd.network_instance.items():
                 vrf = ni.name
                 if hasattr(ni, 'peer'):
@@ -244,7 +245,7 @@ class CiscoRoutingReports:
         path = build_path('/network-instance[name=*]/protocols/ospf/instance[name=*]/area[area-id=*]/interface[interface-name=*]/neighbor[router-id=*]')
         found = False
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for ni in data.network_instance.items():
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
                     ospf = getattr(ni.protocols.get(), 'ospf', None)
@@ -305,7 +306,7 @@ class CiscoRoutingReports:
         intf_ip_map = {}
         try:
             intf_path = build_path('/interface[name=*]/subinterface[index=*]/ipv4/address')
-            intf_data = state.server_data_store.get_data(intf_path, recursive=False)
+            intf_data = state.server.get_data_store(DataStore.State).get_data(intf_path, recursive=False)
             for intf in intf_data.interface.items():
                 if hasattr(intf, 'subinterface'):
                     for sub in intf.subinterface.items():
@@ -323,7 +324,7 @@ class CiscoRoutingReports:
         found = False
         path = build_path('/network-instance[name=*]/protocols/ospf/instance[name=*]/area[area-id=*]/interface[interface-name=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for ni in data.network_instance.items():
                 vrf = ni.name
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
@@ -368,9 +369,9 @@ class CiscoRoutingReports:
         ]
         vxlan_to_ni = {}
         try:
-            ni_data = state.server_data_store.get_data(build_path('/network-instance[name=*]'), recursive=False)
+            ni_data = state.server.get_data_store(DataStore.State).get_data(build_path('/network-instance[name=*]'), recursive=False)
             ni_types = {ni.name: ("L2" if getattr(ni, 'type', 'default') == 'mac-vrf' else "L3") for ni in ni_data.network_instance.items()}
-            vxi_data = state.server_data_store.get_data(build_path('/network-instance[name=*]/vxlan-interface[name=*]'), recursive=False)
+            vxi_data = state.server.get_data_store(DataStore.State).get_data(build_path('/network-instance[name=*]/vxlan-interface[name=*]'), recursive=False)
             for ni in vxi_data.network_instance.items():
                 vni_type = ni_types.get(ni.name, "L2")
                 if hasattr(ni, 'vxlan_interface'):
@@ -381,7 +382,7 @@ class CiscoRoutingReports:
 
         rows = []
         try:
-            data = state.server_data_store.get_data(build_path('/tunnel-interface[name=*]/vxlan-interface[index=*]'), recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(build_path('/tunnel-interface[name=*]/vxlan-interface[index=*]'), recursive=True)
             for ti in data.tunnel_interface.items():
                 t_name = ti.name
                 if hasattr(ti, 'vxlan_interface'):
@@ -425,7 +426,7 @@ class CiscoRoutingReports:
         rows = []
         try:
             path = build_path('/tunnel-interface[name=*]/vxlan-interface[index=*]/bridge-table/unicast-destinations/destination[vtep=*]')
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for ti in data.tunnel_interface.items():
                 if hasattr(ti, 'vxlan_interface'):
                     for vxi in ti.vxlan_interface.items():
@@ -474,7 +475,7 @@ class CiscoRoutingReports:
         peer_link_up = False
         try:
             path = build_path('/system/network-instance/protocols/evpn/ethernet-segments')
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             sys_node = getattr(data, 'system', None)
             if sys_node and hasattr(sys_node.get(), 'network_instance'):
                 sys_ni = sys_node.get().network_instance.get()

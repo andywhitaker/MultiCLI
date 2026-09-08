@@ -8,6 +8,7 @@
 import datetime
 import platform
 from srlinux.location import build_path
+from srlinux.schema.data_store import DataStore
 
 def format_mac_cisco_arista(mac_str):
     if not mac_str:
@@ -44,7 +45,7 @@ class AristaSystemReports:
         part_number = ""
         chassis_path = build_path('/platform/chassis')
         try:
-            chassis_data = state.server_data_store.get_data(chassis_path, recursive=True)
+            chassis_data = state.server.get_data_store(DataStore.State).get_data(chassis_path, recursive=True)
             ch = chassis_data.platform.get().chassis.get()
             if hasattr(ch, 'type') and ch.type:
                 chassis_type = f"Nokia {ch.type}"
@@ -62,7 +63,7 @@ class AristaSystemReports:
         uptime_seconds = 0
         sys_info_path = build_path('/system/information')
         try:
-            sys_data = state.server_data_store.get_data(sys_info_path, recursive=True)
+            sys_data = state.server.get_data_store(DataStore.State).get_data(sys_info_path, recursive=True)
             info = sys_data.system.get().information.get()
             if hasattr(info, 'version') and info.version:
                 sw_version = str(info.version)
@@ -92,7 +93,7 @@ class AristaSystemReports:
         free_mem_kb = 0
         ctrl_path = build_path('/platform/control[slot=*]')
         try:
-            ctrl_data = state.server_data_store.get_data(ctrl_path, recursive=True)
+            ctrl_data = state.server.get_data_store(DataStore.State).get_data(ctrl_path, recursive=True)
             for c in ctrl_data.platform.get().control.items():
                 if hasattr(c, 'memory') and c.memory.exists():
                     mem = c.memory.get()
@@ -128,7 +129,7 @@ class AristaSystemReports:
         hostname = "unknown"
         p_host = build_path('/system/name/host-name')
         try:
-            d_host = state.server_data_store.get_data(p_host, recursive=True)
+            d_host = state.server.get_data_store(DataStore.State).get_data(p_host, recursive=True)
             hostname = d_host.system.get().name.get().host_name or "unknown"
         except Exception:
             pass
@@ -144,7 +145,7 @@ class AristaSystemReports:
         timezone = "UTC"
         sys_info_path = build_path('/system/information')
         try:
-            sys_data = state.server_data_store.get_data(sys_info_path, recursive=True)
+            sys_data = state.server.get_data_store(DataStore.State).get_data(sys_info_path, recursive=True)
             info = sys_data.system.get().information.get()
             if hasattr(info, 'current_datetime') and info.current_datetime:
                 dt_str = str(info.current_datetime).split('(')[0].strip()
@@ -156,7 +157,7 @@ class AristaSystemReports:
 
         try:
             clock_path = build_path('/system/clock')
-            clock_data = state.server_data_store.get_data(clock_path, recursive=True)
+            clock_data = state.server.get_data_store(DataStore.State).get_data(clock_path, recursive=True)
             clock = clock_data.system.get().clock.get()
             if hasattr(clock, 'timezone') and clock.timezone:
                 timezone = str(clock.timezone)
@@ -177,7 +178,7 @@ class AristaSystemReports:
         hw_version = "-"
         try:
             chassis_path = build_path('/platform/chassis')
-            chassis_data = state.server_data_store.get_data(chassis_path, recursive=True)
+            chassis_data = state.server.get_data_store(DataStore.State).get_data(chassis_path, recursive=True)
             chassis = chassis_data.platform.get().chassis.get()
             if hasattr(chassis, 'type') and chassis.type:
                 chassis_type = str(chassis.type)
@@ -203,7 +204,7 @@ class AristaSystemReports:
 
         try:
             psu_path = build_path('/platform/power-supply[id=*]')
-            psu_data = state.server_data_store.get_data(psu_path, recursive=True)
+            psu_data = state.server.get_data_store(DataStore.State).get_data(psu_path, recursive=True)
             psus = [p for p in psu_data.platform.get().power_supply.items() if getattr(p, 'oper_state', '') != 'empty']
             if psus:
                 lines.append(f"System has {len(psus)} power supply slot{'s' if len(psus) != 1 else ''}")
@@ -220,7 +221,7 @@ class AristaSystemReports:
 
         try:
             fan_path = build_path('/platform/fan-tray[id=*]')
-            fan_data = state.server_data_store.get_data(fan_path, recursive=True)
+            fan_data = state.server.get_data_store(DataStore.State).get_data(fan_path, recursive=True)
             fans = [f for f in fan_data.platform.get().fan_tray.items() if getattr(f, 'oper_state', '') != 'empty']
             if fans:
                 lines.append(f"System has {len(fans)} fan module{'s' if len(fans) != 1 else ''}")
@@ -247,7 +248,7 @@ class AristaSystemReports:
             found_fan = False
             try:
                 fan_path = build_path('/platform/fan-tray[id=*]')
-                fan_data = state.server_data_store.get_data(fan_path, recursive=True)
+                fan_data = state.server.get_data_store(DataStore.State).get_data(fan_path, recursive=True)
                 lines.append("Slot  Description                       Status         Speed")
                 lines.append("----- --------------------------------- -------------- ------")
                 for fan in fan_data.platform.get().fan_tray.items():
@@ -270,7 +271,7 @@ class AristaSystemReports:
             found_psu = False
             try:
                 psu_path = build_path('/platform/power-supply[id=*]')
-                psu_data = state.server_data_store.get_data(psu_path, recursive=True)
+                psu_data = state.server.get_data_store(DataStore.State).get_data(psu_path, recursive=True)
                 lines.append("Slot  Model            Output Power   Status")
                 lines.append("----- ---------------- -------------- -----------------")
                 for psu in psu_data.platform.get().power_supply.items():
@@ -296,7 +297,7 @@ class AristaSystemReports:
             found_temp = False
             try:
                 ctrl_path = build_path('/platform/control[slot=*]')
-                ctrl_data = state.server_data_store.get_data(ctrl_path, recursive=True)
+                ctrl_data = state.server.get_data_store(DataStore.State).get_data(ctrl_path, recursive=True)
                 for c in ctrl_data.platform.get().control.items():
                     slot = getattr(c, 'slot', 'A')
                     temp_c = getattr(c, 'temperature', None)
@@ -324,7 +325,7 @@ class AristaSystemReports:
 
         num_ports = 0
         try:
-            intf_data = state.server_data_store.get_data(build_path('/interface[name=*]'), recursive=True)
+            intf_data = state.server.get_data_store(DataStore.State).get_data(build_path('/interface[name=*]'), recursive=True)
             num_ports = sum(1 for i in intf_data.interface.items() if i.name.startswith('ethernet-'))
         except Exception:
             num_ports = 0
@@ -341,7 +342,7 @@ class AristaSystemReports:
             pass
 
         try:
-            lc_data = state.server_data_store.get_data(linecard_path, recursive=True)
+            lc_data = state.server.get_data_store(DataStore.State).get_data(linecard_path, recursive=True)
             for lc in lc_data.platform.get().linecard.items():
                 slot = getattr(lc, 'slot', '1')
                 model = getattr(lc, 'type', '') or getattr(lc, 'part_number', 'Linecard')
@@ -363,7 +364,7 @@ class AristaSystemReports:
 
         if not modules:
             try:
-                ctrl_data = state.server_data_store.get_data(ctrl_path, recursive=True)
+                ctrl_data = state.server.get_data_store(DataStore.State).get_data(ctrl_path, recursive=True)
                 for c in ctrl_data.platform.get().control.items():
                     slot = getattr(c, 'slot', '1')
                     model = getattr(c, 'type', '') or getattr(c, 'part_number', 'Control')

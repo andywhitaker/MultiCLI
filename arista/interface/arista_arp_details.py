@@ -18,6 +18,7 @@ from srlinux.location import build_path
 from srlinux.mgmt.cli.cli_plugin import CliPlugin
 from srlinux.mgmt.cli.key_completer import KeyCompleter
 from srlinux.schema import FixedSchemaRoot
+from srlinux.schema.data_store import DataStore
 from srlinux.syntax import Syntax
 from datetime import datetime, timedelta
 
@@ -77,7 +78,7 @@ class ArpDetails(object):
         path = self._ipv4_address_path(
             arguments, False) if v4 else self._ipv6_address_path(arguments, False)
 
-        return state.server_data_store.stream_data(path, recursive=True)
+        return state.server.get_data_store(DataStore.State).stream_data(path, recursive=True)
 
     def _init_members(self):
         self._total_entries = 0

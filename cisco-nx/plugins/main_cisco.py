@@ -55,36 +55,7 @@ from mac_address_table_report import MacAddressTableReport
 
 from srlinux.mgmt.cli.lazy_loader_utils import wait_for_show_reports_load
 from srlinux.mgmt.cli.cli_mode import CliMode
-from srlinux.mgmt.cli.cli_state import CliState
-from srlinux.schema.data_store import DataStore
-
-_active_data_store_override = None
-
-_orig_is_intermediate = getattr(CliState, '_orig_multicli_is_intermediate', None)
-if _orig_is_intermediate is None:
-    _orig_is_intermediate = CliState.is_intermediate_command.fget
-    CliState._orig_multicli_is_intermediate = _orig_is_intermediate
-
-    def _multicli_is_intermediate(self):
-        first_cmd = self.first_regular_command_name
-        if first_cmd in ['eos', 'nxos', 'junos']:
-            return not self.is_last_command
-        return _orig_is_intermediate(self)
-
-    CliState.is_intermediate_command = property(_multicli_is_intermediate)
-
-_orig_server_data_store = getattr(CliState, '_orig_multicli_server_data_store', None)
-if _orig_server_data_store is None:
-    _orig_server_data_store = CliState.server_data_store.fget
-    CliState._orig_multicli_server_data_store = _orig_server_data_store
-
-    def _multicli_server_data_store(self):
-        global _active_data_store_override
-        if _active_data_store_override is not None:
-            return _active_data_store_override
-        return _orig_server_data_store(self)
-
-    CliState.server_data_store = property(_multicli_server_data_store)
+import os
 
 def _enter_submode(state, arguments):
     if state.is_last_command:
@@ -120,29 +91,15 @@ class Plugin(CliPlugin):
             return parent.root.get_command_or_none(name)
         return None
 
-    def _wrap_callback(self, callback):
-        if not callback:
-            return None
-        def wrapped(state, *args, **kwargs):
-            if state.is_intermediate_command:
-                return
-            global _active_data_store_override
-            _active_data_store_override = state.server.get_data_store(DataStore.State)
-            try:
-                return callback(state, *args, **kwargs)
-            finally:
-                _active_data_store_override = None
-        return wrapped
-
     def _add_or_override(self, parent, syntax, callback=None, schema=None, update_location=False):
         node = self._get_child(parent, syntax.name)
         if node:
             if callback:
-                node.set_callback(self._wrap_callback(callback))
+                node.set_callback(callback)
             return node
         kwargs = {'update_location': update_location}
         if callback is not None:
-            kwargs['callback'] = self._wrap_callback(callback)
+            kwargs['callback'] = callback
         if schema is not None:
             kwargs['schema'] = schema
         return parent.add_command(syntax, **kwargs)
@@ -316,7 +273,7 @@ class Plugin(CliPlugin):
 
     # Callbacks
     def _print_interface_detail(self, state, output, arguments=None, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         CiscoInterfaceReports().show_interface_detail(state, output, arguments=arguments)
 
@@ -333,7 +290,7 @@ class Plugin(CliPlugin):
         CiscoSystemReports().show_inventory(state, output)
 
     def _print_environment_all(self, state, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         CiscoSystemReports().show_environment(state, output, 'all')
 
@@ -359,7 +316,7 @@ class Plugin(CliPlugin):
         CiscoInterfaceReports().show_port_channel_summary(state, output)
 
     def _print_lldp_neighbors(self, state, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         CiscoLldpReports().show_lldp_neighbors(state, output, detail=False)
 
@@ -367,7 +324,7 @@ class Plugin(CliPlugin):
         CiscoLldpReports().show_lldp_neighbors(state, output, detail=True)
 
     def _print_ip_route(self, state, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         IpRouteReport()._show_routes(state, output, network_instance='default')
         output.print_line('\nTry SR Linux command: show network-instance default ipv4 route')
@@ -396,7 +353,7 @@ class Plugin(CliPlugin):
         CiscoRoutingReports().show_ip_ospf_neighbor(state, output)
 
     def _print_mac_address_table(self, state, arguments, output, **kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         MacAddressTableReport()._show_table_instance(state, output, arguments, **kwargs)
 
@@ -416,7 +373,7 @@ class Plugin(CliPlugin):
         CiscoSystemReports().show_processes_cpu(state, output)
 
     def _print_interface_transceiver(self, state, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         CiscoInterfaceReports().show_interface_transceiver(state, output, details=False)
 

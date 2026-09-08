@@ -6,6 +6,7 @@
 
 import re
 from srlinux.location import build_path
+from srlinux.schema.data_store import DataStore
 from cisco_interface_reports import format_cisco_intf
 
 class CiscoLldpReports:
@@ -33,7 +34,7 @@ class CiscoLldpReports:
         path = build_path('/system/lldp/interface[name=*]/neighbor[id=*]')
         entries = []
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for intf in data.get_descendants('/system/lldp/interface'):
                 local_intf = format_cisco_intf(getattr(intf, 'name', ''), short=True)
                 if hasattr(intf, 'neighbor'):

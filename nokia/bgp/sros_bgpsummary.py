@@ -10,6 +10,7 @@ from srlinux import data
 from srlinux.data import Border, ColumnFormatter, TagValueFormatter, Data, Borders, Formatter, TagValuePrinter, Indent
 from srlinux.location import build_path
 from srlinux.schema import FixedSchemaRoot
+from srlinux.schema.data_store import DataStore
 from srlinux.syntax import Syntax
 from datetime import datetime, timezone
 
@@ -237,6 +238,18 @@ class BgpSummaryFilter(object):
                 
         return result
 
+    def _get_netinst(self, state, arguments):
+        if arguments and hasattr(arguments, 'has_node') and arguments.has_node('router'):
+            val = arguments.get_value_or('router', 'netinst', 'default')
+            if val:
+                return val
+        if state and hasattr(state, 'line_commands') and state.line_commands:
+            if hasattr(state.line_commands, 'has_node') and state.line_commands.has_node('router'):
+                val = state.line_commands.get_value_or('router', 'netinst', 'default')
+                if val:
+                    return val
+        return 'default'
+
     def _getBgpSummary_(self, state, arguments):
         """Retrieves main BGP information from the path defined and assigns them to the self class attributes
 
@@ -250,11 +263,11 @@ class BgpSummaryFilter(object):
 
         """
         
-        self._netinst = arguments.get('router','netinst')
+        self._netinst = self._get_netinst(state, arguments)
 
         # building path using network-instance value entered via CLI
         path = build_path('/network-instance[name={name}]/protocols/bgp',name=self._netinst)
-        data = state.server_data_store.get_data(path, recursive=True)
+        data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
         
         self._router_id = data.network_instance.get().protocols.get().bgp.get().router_id
         self._asn = data.network_instance.get().protocols.get().bgp.get().autonomous_system
@@ -285,11 +298,11 @@ class BgpSummaryFilter(object):
 
         """
         
-        self._netinst = arguments.get('router','netinst')
+        self._netinst = self._get_netinst(state, arguments)
         
         # building path using network-instance value entered via CLI for all BGP Neighbors
         path = build_path('/network-instance[name={name}]/protocols/bgp/neighbor[peer-address=*]',name=self._netinst)
-        data: Data = state.server_data_store.get_data(path, recursive=False)
+        data: Data = state.server.get_data_store(DataStore.State).get_data(path, recursive=False)
 
         # getting peer-address from state datastore
         neighbor_list = []
@@ -302,7 +315,7 @@ class BgpSummaryFilter(object):
             neighbor_data[neighbor_ip] = {}
 
             path = build_path('/network-instance[name={name}]/protocols/bgp/neighbor[peer-address={ip}]',name=self._netinst,ip=neighbor_ip)
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
 
             neighbor_data[neighbor_ip]['ip'] = data.network_instance.get().protocols.get().bgp.get().neighbor.get().peer_address
             neighbor_data[neighbor_ip]['asn'] = data.network_instance.get().protocols.get().bgp.get().neighbor.get().peer_as

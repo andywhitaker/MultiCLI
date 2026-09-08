@@ -22,6 +22,7 @@ from srlinux.data import (
 from srlinux.location import build_path
 from srlinux.mgmt.cli import KeyCompleter, MultipleKeyCompleters, CliPlugin
 from srlinux.schema import FixedSchemaRoot
+from srlinux.schema.data_store import DataStore
 from srlinux.syntax import Syntax
 from srlinux import strings
 
@@ -51,19 +52,19 @@ class Plugin(CliPlugin):
 
     @staticmethod
     def _interface_summary(state, arguments, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         JperInterfaceSummary().print(state, arguments, output, **_kwargs)
 
     @staticmethod
     def _interface_brief(state, arguments, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         JperInterfaceBrief().print(state, arguments, output, **_kwargs)
 
     @staticmethod
     def _interface_terse(state, arguments, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         JperInterfaceTerse().print(state, arguments, output, **_kwargs)
 
@@ -162,7 +163,7 @@ class JperInterfaceBrief():
         intf_name, subintf_index = strings.extract_interface_name_subinterface_index(argument_name)
         self._only_subinterface = subintf_index is not None
         path = build_path(f"/interface[name={intf_name}]")
-        return state.server_data_store.stream_data(path, recursive=True), argument_name
+        return state.server.get_data_store(DataStore.State).stream_data(path, recursive=True), argument_name
 
     def _populate_data(self, data, serve_data, chassis_data, arg_name):
         """Function to iterate over data retrieved from state and populate the datastructure
@@ -370,7 +371,7 @@ class JperInterfaceTerse():
         intf_name, subintf_index = strings.extract_interface_name_subinterface_index(argument_name)
         self._only_subinterface = subintf_index is not None
         path = build_path(f"/interface[name={intf_name}]")
-        return state.server_data_store.stream_data(path, recursive=True), argument_name
+        return state.server.get_data_store(DataStore.State).stream_data(path, recursive=True), argument_name
 
 
     def _populate_data(self, data, serve_data, arg_name):
@@ -590,7 +591,7 @@ class JperInterfaceSummary():
         intf_name, subintf_index = strings.extract_interface_name_subinterface_index(argument_name)
         self._only_subinterface = subintf_index is not None
         path = build_path(f"/interface[name={intf_name}]")
-        return state.server_data_store.stream_data(path, recursive=True), argument_name
+        return state.server.get_data_store(DataStore.State).stream_data(path, recursive=True), argument_name
 
     def _populate_data(self, data, serve_data, chassis_data, qos_data, arg_name):
         """Function to iterate over data retrieved from state and populate the datastructure
@@ -1011,9 +1012,9 @@ def _get_add_info(subinterface):
 def _chassis_type(state):
     """Function to retrieve chassis type data needed to output the autonegotiation status."""
     path = build_path("/platform/chassis/type")
-    return state.server_data_store.stream_data(path, recursive=False)
+    return state.server.get_data_store(DataStore.State).stream_data(path, recursive=False)
 
 def _get_qos(state):
     """Function to retrieve QoS data needed to speak on the amount of queues per interface."""
     path_qos = build_path("/qos/interfaces/interface")
-    return state.server_data_store.stream_data(path_qos, recursive=True)
+    return state.server.get_data_store(DataStore.State).stream_data(path_qos, recursive=True)

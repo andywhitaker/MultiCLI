@@ -8,6 +8,7 @@ import datetime
 import ipaddress
 import re
 from srlinux.location import build_path
+from srlinux.schema.data_store import DataStore
 
 def format_junos_intf(name, with_unit=True):
     """Format SR Linux interface name to Juniper JUNOS format."""
@@ -64,7 +65,7 @@ class JunosRoutingReports:
         entries = []
         try:
             path_arpnd = build_path('/interface[name=*]/subinterface[index=*]/ipv4/arp/neighbor[ipv4-address=*]')
-            data_arpnd = state.server_data_store.get_data(path_arpnd, recursive=True)
+            data_arpnd = state.server.get_data_store(DataStore.State).get_data(path_arpnd, recursive=True)
             for intf in data_arpnd.interface.items():
                 if hasattr(intf, 'subinterface'):
                     for sub in intf.subinterface.items():
@@ -83,7 +84,7 @@ class JunosRoutingReports:
         if not entries:
             try:
                 path = build_path('/network-instance[name=*]/neighbor[ipv4-address=*]')
-                data = state.server_data_store.get_data(path, recursive=True)
+                data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
                 for ni in data.network_instance.items():
                     if hasattr(ni, 'neighbor'):
                         for n in ni.neighbor.items():
@@ -110,7 +111,7 @@ class JunosRoutingReports:
         ]
         path = build_path('/system/lldp/interface[name=*]/neighbor[id=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for iface in data.get_descendants('/system/lldp/interface'):
                 local_name = format_junos_intf(getattr(iface, 'name', ''), with_unit=False)
                 if hasattr(iface, 'neighbor'):
@@ -139,7 +140,7 @@ class JunosRoutingReports:
                 p_name, sub_idx = intf_name.split('.', 1)
                 try:
                     p = build_path(f'/interface[name={p_name}]/subinterface[index={sub_idx}]/vlan/encap/single-tagged/vlan-id')
-                    d = state.server_data_store.get_data(p, recursive=False)
+                    d = state.server.get_data_store(DataStore.State).get_data(p, recursive=False)
                     vlan_val = getattr(d.interface.get().subinterface.get().vlan.get().encap.get().single_tagged.get(), 'vlan_id', None)
                     if vlan_val is not None:
                         return str(vlan_val)
@@ -171,7 +172,7 @@ class JunosRoutingReports:
         raw_intfs_by_ni = {}
         try:
             intf_p = build_path('/network-instance[name=*]/interface[name=*]')
-            intf_data = state.server_data_store.get_data(intf_p, recursive=False)
+            intf_data = state.server.get_data_store(DataStore.State).get_data(intf_p, recursive=False)
             for ni in intf_data.network_instance.items():
                 if hasattr(ni, 'interface'):
                     raw_intfs_by_ni[ni.name] = [intf.name for intf in ni.interface.items()]
@@ -181,7 +182,7 @@ class JunosRoutingReports:
 
         path = build_path('/network-instance[name=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=False)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=False)
             for ni in sorted(data.network_instance.items(), key=lambda x: str(x.name)):
                 ni_type = getattr(ni, 'type', '')
                 if ni_type != 'mac-vrf':
@@ -208,7 +209,7 @@ class JunosRoutingReports:
         lines = []
         path = build_path('/interface[name=lag*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for intf in data.interface.items():
                 name = intf.name
                 ae_name = format_junos_intf(name, with_unit=False)
@@ -283,7 +284,7 @@ class JunosRoutingReports:
         path_routes = build_path(f'/network-instance[name={network_instance}]/route-table')
         routes_data = None
         try:
-            routes_data = state.server_data_store.get_data(path_routes, recursive=True)
+            routes_data = state.server.get_data_store(DataStore.State).get_data(path_routes, recursive=True)
         except Exception:
             pass
 
@@ -469,7 +470,7 @@ class JunosRoutingReports:
         # Query BGP AS and router ID
         try:
             path_bgp = build_path('/network-instance[name=default]/protocols/bgp')
-            bgp_data = state.server_data_store.get_data(path_bgp, recursive=True)
+            bgp_data = state.server.get_data_store(DataStore.State).get_data(path_bgp, recursive=True)
             bgp = bgp_data.network_instance.get().protocols.get().bgp.get()
             asn = getattr(bgp, 'autonomous_system', '--')
             router_id = getattr(bgp, 'router_id', '--')
@@ -486,7 +487,7 @@ class JunosRoutingReports:
 
         try:
             path_rt = build_path('/network-instance[name=default]/route-table/ipv4-unicast/route[ipv4-prefix=*]')
-            rt_data = state.server_data_store.get_data(path_rt, recursive=True)
+            rt_data = state.server.get_data_store(DataStore.State).get_data(path_rt, recursive=True)
             for r in rt_data.network_instance.get().route_table.get().ipv4_unicast.get().route.items():
                 rtype = str(getattr(r, 'route_type', '')).lower()
                 rowner = str(getattr(r, 'route_owner', '')).lower()
@@ -531,7 +532,7 @@ class JunosRoutingReports:
         peers = []
         peer_groups = set()
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for n in data.get_descendants('/network-instance/protocols/bgp/neighbor'):
                 peer_ip = getattr(n, 'peer_address', '-')
                 peer_as = getattr(n, 'peer_as', '--')
@@ -581,7 +582,7 @@ class JunosRoutingReports:
         # Query configured peer-groups if available
         try:
             pg_path = build_path('/network-instance[name=*]/protocols/bgp/peer-group[peer-group-name=*]')
-            pg_data = state.server_data_store.get_data(pg_path, recursive=False)
+            pg_data = state.server.get_data_store(DataStore.State).get_data(pg_path, recursive=False)
             for g in pg_data.get_descendants('/network-instance/protocols/bgp/peer-group'):
                 gname = getattr(g, 'peer_group_name', None)
                 if gname:
@@ -596,7 +597,7 @@ class JunosRoutingReports:
         pfx_count = 0
         try:
             rt_path = build_path('/network-instance[name=default]/route-table/ipv4-unicast/route[ipv4-prefix=*]')
-            rt_data = state.server_data_store.get_data(rt_path, recursive=False)
+            rt_data = state.server.get_data_store(DataStore.State).get_data(rt_path, recursive=False)
             pfx_count = len(list(rt_data.get_descendants('/network-instance/route-table/ipv4-unicast/route')))
         except Exception:
             pass
@@ -604,7 +605,7 @@ class JunosRoutingReports:
 
         try:
             rt6_path = build_path('/network-instance[name=default]/route-table/ipv6-unicast/route[ipv6-prefix=*]')
-            rt6_data = state.server_data_store.get_data(rt6_path, recursive=False)
+            rt6_data = state.server.get_data_store(DataStore.State).get_data(rt6_path, recursive=False)
             pfx6_count = len(list(rt6_data.get_descendants('/network-instance/route-table/ipv6-unicast/route')))
             if pfx6_count > 0:
                 tables.append(("inet6.0", pfx6_count))
@@ -632,7 +633,7 @@ class JunosRoutingReports:
         ]
         path = build_path('/network-instance[name=*]/protocols/ospf/instance[name=*]/area[area-id=*]/interface[interface-name=*]/neighbor[router-id=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for ni in data.network_instance.items():
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
                     ospf = getattr(ni.protocols.get(), 'ospf', None)
@@ -666,7 +667,7 @@ class JunosRoutingReports:
         ]
         path = build_path('/network-instance[name=*]/protocols/isis/instance[name=*]/interface[interface-name=*]/adjacency[neighbor-system-id=*][adjacency-level=*]')
         try:
-            data = state.server_data_store.get_data(path, recursive=True)
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for ni in data.network_instance.items():
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
                     isis = getattr(ni.protocols.get(), 'isis', None)

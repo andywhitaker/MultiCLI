@@ -58,37 +58,7 @@ except Exception:
 
 from srlinux.mgmt.cli.lazy_loader_utils import wait_for_show_reports_load
 from srlinux.mgmt.cli.cli_mode import CliMode
-from srlinux.mgmt.cli.cli_state import CliState
-from srlinux.schema.data_store import DataStore
 import os
-
-_active_data_store_override = None
-
-_orig_is_intermediate = getattr(CliState, '_orig_multicli_is_intermediate', None)
-if _orig_is_intermediate is None:
-    _orig_is_intermediate = CliState.is_intermediate_command.fget
-    CliState._orig_multicli_is_intermediate = _orig_is_intermediate
-
-    def _multicli_is_intermediate(self):
-        first_cmd = self.first_regular_command_name
-        if first_cmd in ['eos', 'nxos', 'junos']:
-            return not self.is_last_command
-        return _orig_is_intermediate(self)
-
-    CliState.is_intermediate_command = property(_multicli_is_intermediate)
-
-_orig_server_data_store = getattr(CliState, '_orig_multicli_server_data_store', None)
-if _orig_server_data_store is None:
-    _orig_server_data_store = CliState.server_data_store.fget
-    CliState._orig_multicli_server_data_store = _orig_server_data_store
-
-    def _multicli_server_data_store(self):
-        global _active_data_store_override
-        if _active_data_store_override is not None:
-            return _active_data_store_override
-        return _orig_server_data_store(self)
-
-    CliState.server_data_store = property(_multicli_server_data_store)
 
 def _enter_submode(state, arguments):
     if state.is_last_command:
@@ -124,29 +94,15 @@ class Plugin(CliPlugin):
             return parent.root.get_command_or_none(name)
         return None
 
-    def _wrap_callback(self, callback):
-        if not callback:
-            return None
-        def wrapped(state, *args, **kwargs):
-            if state.is_intermediate_command:
-                return
-            global _active_data_store_override
-            _active_data_store_override = state.server.get_data_store(DataStore.State)
-            try:
-                return callback(state, *args, **kwargs)
-            finally:
-                _active_data_store_override = None
-        return wrapped
-
     def _add_or_override(self, parent, syntax, callback=None, schema=None, update_location=False):
         node = self._get_child(parent, syntax.name)
         if node:
             if callback:
-                node.set_callback(self._wrap_callback(callback))
+                node.set_callback(callback)
             return node
         kwargs = {'update_location': update_location}
         if callback is not None:
-            kwargs['callback'] = self._wrap_callback(callback)
+            kwargs['callback'] = callback
         if schema is not None:
             kwargs['schema'] = schema
         return parent.add_command(syntax, **kwargs)
@@ -614,7 +570,7 @@ class Plugin(CliPlugin):
         AristaSystemReports().show_inventory(state, output)
 
     def _print_environment_all(self, state, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         AristaSystemReports().show_environment(state, output, 'all')
 
@@ -628,7 +584,7 @@ class Plugin(CliPlugin):
         AristaSystemReports().show_environment(state, output, 'temperature')
 
     def _print_ip_route(self, state, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         AristaRoutingReports().show_ip_route(state, output, vrf='default')
 
@@ -652,7 +608,7 @@ class Plugin(CliPlugin):
         AristaRoutingReports().show_isis_neighbors(state, output)
 
     def _print_lldp_neighbors(self, state, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         AristaInterfaceReports().show_lldp_neighbors(state, output, detail=False)
 
@@ -725,7 +681,7 @@ class Plugin(CliPlugin):
         output.print_line('Try SR Linux command: show network-instance default protocols bgp routes evpn route-type 5 summary')
 
     def _interface_details(self, state, arguments, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         InterfaceDetails().print(state, arguments, output, **_kwargs)
         name = None
@@ -741,7 +697,7 @@ class Plugin(CliPlugin):
         output.print_line(f'\n{"-" * len(msg)}\n{msg}')
 
     def _interface_status(self, state, arguments, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         InterfaceStatus().print(state, arguments, output)
         name = None
@@ -757,14 +713,14 @@ class Plugin(CliPlugin):
         output.print_line(f'\n{"-" * len(msg)}\n{msg}')
 
     def _arp_entries(self, state, arguments, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         ArpDetails().print(state, arguments, output)
         msg = 'Try SR Linux command: show arpnd arp-entries'
         output.print_line(f'\n{"-" * len(msg)}\n{msg}')
 
     def _print_interfaces_transceiver(self, state, output, **_kwargs):
-        if state.is_intermediate_command:
+        if not state.is_last_command:
             return
         AristaInterfaceReports().show_interfaces_transceiver(state, output, detail=False)
 

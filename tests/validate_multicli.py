@@ -2,7 +2,7 @@
 """
 validate_multicli.py
 Automated validation harness for all MultiCLI commands across
-Arista EOS (leaf1), Cisco NX-OS (leaf2), and Juniper JUNOS (leaf3).
+Arista EOS (leaf1), Cisco NX-OS (leaf2), Juniper JUNOS (leaf3), and Nokia SR OS (leaf4).
 """
 
 import os
@@ -66,6 +66,7 @@ TEST_SUITES = {
             ("eos", ["show interfaces", "show interfaces status"], "Ethernet1/1"),
             ("nxos", ["show hostname", "show version"], "Nokia SR Linux Software"),
             ("junos", ["show version"], "Hostname:"),
+            ("sros", ["show version"], "SRLinux-"),
         ],
         "negative_assertions": [
             ("show mlag", "state: Active", "show mlag should not output hardcoded 'state: Active' when no MLAG is configured"),
@@ -173,6 +174,7 @@ TEST_SUITES = {
             ("nxos", ["show ip route"], "Gateway of last resort"),
             ("eos", ["show hostname", "show version"], "Nokia 7220 IXR-D2L"),
             ("junos", ["show version"], "Hostname:"),
+            ("sros", ["show version"], "SRLinux-"),
         ],
         "negative_assertions": [
             ("show vpc", "peer-link is up", "show vpc should not output hardcoded 'peer-link is up' when no VPC/ES is configured"),
@@ -261,6 +263,7 @@ TEST_SUITES = {
             ("junos", ["show interfaces"], "Physical interface:"),
             ("eos", ["show hostname", "show version"], "Nokia 7220 IXR-D2L"),
             ("nxos", ["show hostname", "show version"], "Nokia SR Linux Software"),
+            ("sros", ["show version"], "SRLinux-"),
         ],
         "negative_assertions": [
             ("show system uptime", "Time Source: NTP CLOCK", "show system uptime should dynamically verify NTP state rather than hardcoding NTP CLOCK"),
@@ -289,6 +292,75 @@ TEST_SUITES = {
             ("junos show version", "Hostname:", "junos show version must output Juniper-formatted version"),
             ("junos show route", "inet.0:", "junos show route must output Juniper-formatted route table"),
         ]
+    },
+    "Nokia SROS": {
+        "arg_key": "nokia_node",
+        "default_node": "leaf4",
+        "commands": [
+            "show version",
+            "show system information",
+            "show chassis",
+            "show port",
+            "show port 1/1/1",
+            "show port description",
+            "show lag",
+            "show system lldp neighbor",
+            "show router route-table",
+            "show router default route-table",
+            "show router tenant1 route-table",
+            "show router interface",
+            "show router arp",
+            "show router bgp summary",
+            "show router ospf neighbor",
+            "show router isis adjacency",
+            "show service service-using",
+            "show service fdb mac",
+            "show service id app vxlan destinations",
+            "show service id app fdb mac",
+            "sros show version",
+            "sros show router route-table",
+            "sros show port",
+            "sros show chassis",
+            "sros show system information",
+        ],
+        "submode_tests": [
+            ("sros", ["show"], "sros"),
+            ("sros", ["show version"], "SRLinux-"),
+            ("sros", ["show version", "show router route-table"], "Route Table"),
+            ("sros", ["show port", "show chassis"], "Chassis Information"),
+            ("eos", ["show version"], "Nokia 7220 IXR-D2L"),
+            ("nxos", ["show version"], "Nokia SR Linux Software"),
+            ("junos", ["show version"], "Hostname:"),
+        ],
+        "negative_assertions": [
+            ("show port", "with framing overhead", "show port should not trigger standard SRL show interface output"),
+            ("show router route-table", "Gateway of last resort", "show router route-table should not output Cisco/Arista header"),
+            ("show version", "Software image:", "show version should not output Juniper style version header"),
+            ("show chassis", "Cannot create node", "show chassis should not raise plugin load errors"),
+            ("show version", "TiMOS", "show version should not output TiMOS - must accurately report SR Linux"),
+            ("show version", "panos", "show version should not output synthetic SROS panos build path"),
+        ],
+        "positive_assertions": [
+            ("show version", "SRLinux-", "show version must output authentic SRLinux banner in SROS format"),
+            ("show version", "7220 IXR-D2L", "show version must output actual chassis model"),
+            ("show version", "Try SR Linux command: show version", "show version must recommend SR Linux command"),
+            ("show system information", "System Up Time", "show system information must output system uptime"),
+            ("show system information", "Try SR Linux command: info from state system information", "show system information must recommend SRL command"),
+            ("show chassis", "Chassis Information", "show chassis must display chassis information"),
+            ("show chassis", "Try SR Linux command: show platform chassis", "show chassis must recommend SRL chassis command"),
+            ("show port", "Ports on Slot 1", "show port must display port table"),
+            ("show port", "Try SR Linux command: show interface brief", "show port must recommend SRL interface brief"),
+            ("show port description", "Port Descriptions on Slot 1", "show port description must display port descriptions"),
+            ("show lag", "Lag Data", "show lag must display lag data"),
+            ("show system lldp neighbor", "LLDP Remote System Information", "show system lldp neighbor must display lldp info"),
+            ("show router route-table", "Route Table (Router: default)", "show router route-table must display default route table"),
+            ("show router route-table", "Try SR Linux command: show network-instance default ipv4 route", "show router route-table must recommend SRL route command"),
+            ("show router interface", "Interface Table (Router: default)", "show router interface must display interface table"),
+            ("show router arp", "ARP Table (Router: default)", "show router arp must display ARP table"),
+            ("show router bgp summary", "BGP Summary", "show router bgp summary must display BGP summary table"),
+            ("show service service-using", "Services [Customer: All]", "show service service-using must display service table"),
+            ("show service id app vxlan destinations", "Egress VTEP, VNI", "show service id app vxlan destinations must display VXLAN destinations"),
+        ],
     }
 }
 
@@ -435,6 +507,7 @@ def validate_recommended_srl_commands(target_node="leaf1"):
         "show arpnd arp-entries",
         "show lag",
         "show network-instance default protocols bgp neighbor",
+        "show network-instance default protocols bgp summary",
         "show network-instance default protocols bgp routes evpn route-type 1 summary",
         "show network-instance default protocols bgp routes evpn route-type 2 summary",
         "show network-instance default protocols bgp routes evpn route-type 3 summary",
@@ -514,9 +587,10 @@ def validate(args):
         print("\n==> Installing MultiCLI personas to target nodes...")
         install_tasks = [("leaf1", "arista_node", "arista"),
                          ("leaf2", "cisco_node", "cisco"),
-                         ("leaf3", "juniper_node", "juniper")]
+                         ("leaf3", "juniper_node", "juniper"),
+                         ("leaf4", "nokia_node", "nokia")]
         if not getattr(args, 'sequential', False):
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
                 futs = [executor.submit(subprocess.run, [switch_script, "all", getattr(args, key, def_node), "--default", persona], check=True)
                         for def_node, key, persona in install_tasks]
                 for f in futs:
@@ -578,6 +652,7 @@ if __name__ == "__main__":
     parser.add_argument("--arista-node", default="leaf1", help="Target node running Arista EOS persona (default: leaf1)")
     parser.add_argument("--cisco-node", default="leaf2", help="Target node running Cisco NX-OS persona (default: leaf2)")
     parser.add_argument("--juniper-node", default="leaf3", help="Target node running Juniper JUNOS persona (default: leaf3)")
+    parser.add_argument("--nokia-node", default="leaf4", help="Target node running Nokia SR OS persona (default: leaf4)")
     parser.add_argument("--install", action="store_true", help="Automatically configure each target node with switch-multicli.sh before validation")
     parser.add_argument("--sequential", action="store_true", help="Run node test suites sequentially instead of in parallel")
     cli_args = parser.parse_args()
