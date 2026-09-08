@@ -123,21 +123,151 @@ done
 echo "==> Configuring node '$TARGET_NODE' with MultiCLI [${VENDORS[*]}] (default persona: $DEFAULT_PERSONA)..."
 
 if [ "$USE_DOCKER_CP" = true ]; then
-    docker exec "$TARGET_NODE" bash -c 'rm -rf /etc/opt/srlinux/cli/plugins/{main_{arista,cisco,juniper,nokia}.py,ip_reports.py,mac_reports.py,Cisco_nxos_lldp_neighbor,ethernet_switching_reports.py,show_interfaces.py,sros_bgp_report.py,service_report.py,sros_router_report.py} /etc/opt/srlinux/cli/{system,routing,interface,ip,mac,eth_switch,bgp,evpn,service,README.md} 2>/dev/null || true; find /etc/opt/srlinux/cli -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true; mkdir -p /etc/opt/srlinux/cli/plugins'
+    docker exec "$TARGET_NODE" python3 -c '
+import os, json, shutil
+cli_dir = "/etc/opt/srlinux/cli"
+manifest_path = os.path.join(cli_dir, ".multicli_manifest.json")
+legacy_files = {
+    "plugins/main_arista.py", "plugins/main_cisco.py", "plugins/main_juniper.py", "plugins/main_nokia.py",
+    "plugins/ip_reports.py", "plugins/mac_reports.py", "plugins/Cisco_nxos_lldp_neighbor",
+    "plugins/ethernet_switching_reports.py", "plugins/show_interfaces.py", "plugins/sros_bgp_report.py",
+    "plugins/service_report.py", "plugins/sros_router_report.py", "default_persona", "README.md"
+}
+legacy_dirs = ["system", "routing", "interface", "ip", "mac", "eth_switch", "bgp", "evpn", "service"]
+
+to_remove = set(legacy_files)
+dirs_to_clean = set(legacy_dirs)
+if os.path.exists(manifest_path):
+    try:
+        with open(manifest_path) as f:
+            m = json.load(f)
+            to_remove.update(m.get("installed_files", []))
+            dirs_to_clean.update(m.get("installed_dirs", []))
+    except Exception:
+        pass
+
+for rel in to_remove:
+    fp = os.path.join(cli_dir, rel)
+    if os.path.isfile(fp):
+        try: os.remove(fp)
+        except Exception: pass
+
+for d in sorted(dirs_to_clean - {"plugins", "."}, key=len, reverse=True):
+    dp = os.path.join(cli_dir, d)
+    if os.path.isdir(dp):
+        try: os.rmdir(dp)
+        except OSError: pass
+
+if os.path.exists(manifest_path):
+    try: os.remove(manifest_path)
+    except Exception: pass
+' 2>/dev/null || true
+    docker exec "$TARGET_NODE" bash -c 'find /etc/opt/srlinux/cli/plugins -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true; mkdir -p /etc/opt/srlinux/cli/plugins'
+
     for v in "${VENDORS[@]}"; do
         docker cp "$SCRIPT_DIR/$v"/. "$TARGET_NODE":/etc/opt/srlinux/cli/
     done
     docker exec "$TARGET_NODE" bash -c "echo '$DEFAULT_PERSONA' > /etc/opt/srlinux/cli/default_persona"
+
+    # Generate .multicli_manifest.json dynamically from installed vendors
+    docker exec "$TARGET_NODE" python3 -c "
+import os, json
+cli_dir = '/etc/opt/srlinux/cli'
+files = []
+dirs = []
+for root, d_list, f_list in os.walk(cli_dir):
+    for d in d_list:
+        if d != '__pycache__':
+            rel_d = os.path.relpath(os.path.join(root, d), cli_dir)
+            if rel_d != 'plugins':
+                dirs.append(rel_d)
+    for f in f_list:
+        if not f.endswith('.pyc') and f != '.multicli_manifest.json':
+            rel_f = os.path.relpath(os.path.join(root, f), cli_dir)
+            # Only track MultiCLI files, never user files
+            if not rel_f.startswith('plugins/') or any(rel_f == f'plugins/{p}' for p in ['main_arista.py','main_cisco.py','main_juniper.py','main_nokia.py','show_interfaces.py','ip_reports.py','mac_reports.py','Cisco_nxos_lldp_neighbor','ethernet_switching_reports.py','sros_bgp_report.py','service_report.py','sros_router_report.py']):
+                files.append(rel_f)
+
+manifest = {
+    'version': '0.2.0',
+    'installed_persona': '$DEFAULT_PERSONA',
+    'installed_files': sorted(set(files)),
+    'installed_dirs': sorted(set(dirs))
+}
+with open(os.path.join(cli_dir, '.multicli_manifest.json'), 'w') as fp:
+    json.dump(manifest, fp, indent=2)
+"
     echo "==> Successfully installed [${VENDORS[*]}] to $TARGET_NODE via docker cp."
 else
     mkdir -p "$TARGET_CLI_DIR"/plugins
-    rm -rf "$TARGET_CLI_DIR"/plugins/{main_{arista,cisco,juniper,nokia}.py,ip_reports.py,mac_reports.py,Cisco_nxos_lldp_neighbor,ethernet_switching_reports.py,show_interfaces.py,sros_bgp_report.py,service_report.py,sros_router_report.py} "$TARGET_CLI_DIR"/{system,routing,interface,ip,mac,eth_switch,bgp,evpn,service,README.md} 2>/dev/null || true
-    find "$TARGET_CLI_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+    python3 -c "
+import os, json
+cli_dir = '$TARGET_CLI_DIR'
+manifest_path = os.path.join(cli_dir, '.multicli_manifest.json')
+legacy_files = {
+    'plugins/main_arista.py', 'plugins/main_cisco.py', 'plugins/main_juniper.py', 'plugins/main_nokia.py',
+    'plugins/ip_reports.py', 'plugins/mac_reports.py', 'plugins/Cisco_nxos_lldp_neighbor',
+    'plugins/ethernet_switching_reports.py', 'plugins/show_interfaces.py', 'plugins/sros_bgp_report.py',
+    'plugins/service_report.py', 'plugins/sros_router_report.py', 'default_persona', 'README.md'
+}
+legacy_dirs = ['system', 'routing', 'interface', 'ip', 'mac', 'eth_switch', 'bgp', 'evpn', 'service']
+to_remove = set(legacy_files)
+dirs_to_clean = set(legacy_dirs)
+if os.path.exists(manifest_path):
+    try:
+        with open(manifest_path) as f:
+            m = json.load(f)
+            to_remove.update(m.get('installed_files', []))
+            dirs_to_clean.update(m.get('installed_dirs', []))
+    except Exception: pass
+
+for rel in to_remove:
+    fp = os.path.join(cli_dir, rel)
+    if os.path.isfile(fp):
+        try: os.remove(fp)
+        except Exception: pass
+
+for d in sorted(dirs_to_clean - {'plugins', '.'}, key=len, reverse=True):
+    dp = os.path.join(cli_dir, d)
+    if os.path.isdir(dp):
+        try: os.rmdir(dp)
+        except OSError: pass
+
+if os.path.exists(manifest_path):
+    try: os.remove(manifest_path)
+    except Exception: pass
+" 2>/dev/null || true
+    find "$TARGET_CLI_DIR"/plugins -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
     mkdir -p "$TARGET_CLI_DIR"/plugins
     for v in "${VENDORS[@]}"; do
         cp -r "$SCRIPT_DIR/$v"/* "$TARGET_CLI_DIR"/
     done
     echo "$DEFAULT_PERSONA" > "$TARGET_CLI_DIR"/default_persona
+    python3 -c "
+import os, json
+cli_dir = '$TARGET_CLI_DIR'
+files = []
+dirs = []
+for root, d_list, f_list in os.walk(cli_dir):
+    for d in d_list:
+        if d != '__pycache__':
+            rel_d = os.path.relpath(os.path.join(root, d), cli_dir)
+            if rel_d != 'plugins': dirs.append(rel_d)
+    for f in f_list:
+        if not f.endswith('.pyc') and f != '.multicli_manifest.json':
+            rel_f = os.path.relpath(os.path.join(root, f), cli_dir)
+            if not rel_f.startswith('plugins/') or any(rel_f == f'plugins/{p}' for p in ['main_arista.py','main_cisco.py','main_juniper.py','main_nokia.py','show_interfaces.py','ip_reports.py','mac_reports.py','Cisco_nxos_lldp_neighbor','ethernet_switching_reports.py','sros_bgp_report.py','service_report.py','sros_router_report.py']):
+                files.append(rel_f)
+
+manifest = {
+    'version': '0.2.0',
+    'installed_persona': '$DEFAULT_PERSONA',
+    'installed_files': sorted(set(files)),
+    'installed_dirs': sorted(set(dirs))
+}
+with open(os.path.join(cli_dir, '.multicli_manifest.json'), 'w') as fp:
+    json.dump(manifest, fp, indent=2)
+"
     echo "==> Successfully installed [${VENDORS[*]}] to $TARGET_NODE ($TARGET_CLI_DIR)."
 fi
 

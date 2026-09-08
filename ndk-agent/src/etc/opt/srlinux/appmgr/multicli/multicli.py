@@ -15,6 +15,7 @@ import json
 import re
 import subprocess
 import netns
+import shutil
 from typing import Any
 
 ## NDK 0.5.0 gRPC Services
@@ -257,10 +258,117 @@ def process_notification(notification):
         logging.info("Agent Stopped Time :: {}".format(datetime.datetime.now()))
         return
 
+MANIFEST_FILE = ".multicli_manifest.json"
+
+LEGACY_MULTICLI_FILES = {
+    "plugins/main_arista.py", "plugins/main_cisco.py",
+    "plugins/main_juniper.py", "plugins/main_nokia.py",
+    "plugins/ip_reports.py", "plugins/mac_reports.py",
+    "plugins/Cisco_nxos_lldp_neighbor", "plugins/ethernet_switching_reports.py",
+    "plugins/show_interfaces.py", "plugins/sros_bgp_report.py",
+    "plugins/service_report.py", "plugins/sros_router_report.py",
+    "default_persona", "README.md"
+}
+
+LEGACY_MULTICLI_DIRS = [
+    "system", "routing", "interface", "ip", "mac",
+    "eth_switch", "bgp", "evpn", "service"
+]
+
+def clean_multicli_assets(target_dir=cli_plugins_dir):
+    """Remove only MultiCLI-tracked files, preserving all user/third-party plugins."""
+    manifest_path = os.path.join(target_dir, MANIFEST_FILE)
+    installed_files = set()
+    installed_dirs = set()
+
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, 'r') as f:
+                data = json.load(f)
+                installed_files = set(data.get("installed_files", []))
+                installed_dirs = set(data.get("installed_dirs", []))
+        except Exception as e:
+            logging.warning(f"Error reading manifest: {e}")
+
+    # Combine manifest files with legacy fallback set
+    files_to_remove = installed_files | LEGACY_MULTICLI_FILES
+    for rel_path in files_to_remove:
+        full_path = os.path.join(target_dir, rel_path)
+        if os.path.isfile(full_path):
+            try:
+                os.remove(full_path)
+            except Exception as e:
+                logging.warning(f"Failed to remove {full_path}: {e}")
+
+    # Remove directories if empty (never remove plugins/ or root)
+    dirs_to_check = (installed_dirs | set(LEGACY_MULTICLI_DIRS)) - {"plugins", "."}
+    for rel_dir in sorted(dirs_to_check, key=lambda d: len(d), reverse=True):
+        full_dir = os.path.join(target_dir, rel_dir)
+        if os.path.isdir(full_dir):
+            try:
+                os.rmdir(full_dir)  # Fails safely if directory contains user files
+            except OSError:
+                pass  # Directory not empty, preserve it
+
+    # Clean manifest file
+    if os.path.exists(manifest_path):
+        try:
+            os.remove(manifest_path)
+        except Exception:
+            pass
+
+    # Clean stale __pycache__ inside plugins without deleting other plugins
+    plugins_dir = os.path.join(target_dir, "plugins")
+    if os.path.isdir(plugins_dir):
+        subprocess.run(f"find {plugins_dir} -type d -name '__pycache__' -exec rm -rf {{}} + 2>/dev/null || true", shell=True)
+
+
+def copy_with_manifest(source_dirs, target_dir, persona):
+    """Copy vendor tree(s) to target and write .multicli_manifest.json."""
+    if isinstance(source_dirs, str):
+        source_dirs = [source_dirs]
+
+    manifest = {
+        "version": "0.2.0",
+        "installed_persona": persona,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "installed_files": [],
+        "installed_dirs": []
+    }
+
+    for s_dir in source_dirs:
+        for root, dirs, files in os.walk(s_dir):
+            rel_root = os.path.relpath(root, s_dir)
+            dest_root = target_dir if rel_root == "." else os.path.join(target_dir, rel_root)
+            os.makedirs(dest_root, exist_ok=True)
+            if rel_root != "." and rel_root not in manifest["installed_dirs"]:
+                manifest["installed_dirs"].append(rel_root)
+
+            for f in files:
+                src_f = os.path.join(root, f)
+                dest_f = os.path.join(dest_root, f)
+                shutil.copy2(src_f, dest_f)
+                rel_dest = os.path.relpath(dest_f, target_dir)
+                if rel_dest not in manifest["installed_files"]:
+                    manifest["installed_files"].append(rel_dest)
+
+    # Add default_persona to manifest
+    persona_file = os.path.join(target_dir, "default_persona")
+    with open(persona_file, "w") as pf:
+        pf.write(f"{persona}\n")
+    if "default_persona" not in manifest["installed_files"]:
+        manifest["installed_files"].append("default_persona")
+
+    # Save manifest
+    manifest_path = os.path.join(target_dir, MANIFEST_FILE)
+    with open(manifest_path, "w") as mf:
+        json.dump(manifest, mf, indent=2)
+
+
 def multicli_function(selected_nos, seleceted_repo_url):
 
-    # Deleting all the files in the custom CLI commands folder. This is something we can improve!
-    subprocess.run(f"rm -rf {cli_plugins_dir}/*", shell=True, check=True)
+    # Clean only MultiCLI files and subdirectories, preserving all other user plugins
+    clean_multicli_assets(cli_plugins_dir)
 
     # Confirming that a NOS has been selected
     if selected_nos != 'none':
@@ -297,27 +405,21 @@ def multicli_function(selected_nos, seleceted_repo_url):
                     else:
                         logging.info(f"Copying files for the Selected NOS: {selected_nos}")
 
-                        # Clean existing files and stale pycache
-                        subprocess.run(f"rm -rf {cli_plugins_dir}/*", shell=True, check=True)
-                        subprocess.run(f"find {cli_plugins_dir} -type d -name '__pycache__' -exec rm -rf {{}} + 2>/dev/null || true", shell=True)
+                        # Clean previous MultiCLI assets safely
+                        clean_multicli_assets(cli_plugins_dir)
 
                         match selected_nos:
                             case 'nokia-sros':
-                                subprocess.run(f"cp -r {extracted_root}/nokia/* {cli_plugins_dir}/.", shell=True, check=True)
-                                subprocess.run(f"echo 'nokia' > {cli_plugins_dir}/default_persona", shell=True, check=True)
+                                copy_with_manifest([os.path.join(extracted_root, "nokia")], cli_plugins_dir, 'nokia')
                             case 'arista':
-                                subprocess.run(f"cp -r {extracted_root}/arista/* {cli_plugins_dir}/.", shell=True, check=True)
-                                subprocess.run(f"echo 'arista' > {cli_plugins_dir}/default_persona", shell=True, check=True)
+                                copy_with_manifest([os.path.join(extracted_root, "arista")], cli_plugins_dir, 'arista')
                             case 'juniper':
-                                subprocess.run(f"cp -r {extracted_root}/juniper/* {cli_plugins_dir}/.", shell=True, check=True)
-                                subprocess.run(f"echo 'juniper' > {cli_plugins_dir}/default_persona", shell=True, check=True)
+                                copy_with_manifest([os.path.join(extracted_root, "juniper")], cli_plugins_dir, 'juniper')
                             case 'cisco':
-                                subprocess.run(f"cp -r {extracted_root}/cisco-nx/* {cli_plugins_dir}/.", shell=True, check=True)
-                                subprocess.run(f"echo 'cisco' > {cli_plugins_dir}/default_persona", shell=True, check=True)
+                                copy_with_manifest([os.path.join(extracted_root, "cisco-nx")], cli_plugins_dir, 'cisco')
                             case 'all':
-                                for d in ['arista', 'cisco-nx', 'juniper', 'nokia']:
-                                    subprocess.run(f"cp -r {extracted_root}/{d}/* {cli_plugins_dir}/.", shell=True, check=True)
-                                subprocess.run(f"echo 'none' > {cli_plugins_dir}/default_persona", shell=True, check=True)
+                                all_vendor_dirs = [os.path.join(extracted_root, d) for d in ['arista', 'cisco-nx', 'juniper', 'nokia']]
+                                copy_with_manifest(all_vendor_dirs, cli_plugins_dir, 'none')
 
                         logging.info(f"Deleting temp folder...")
                         subprocess.run(f"rm -rf {tmp_dir}", shell=True, check=True)
