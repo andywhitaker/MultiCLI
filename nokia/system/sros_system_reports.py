@@ -15,7 +15,7 @@ class SrosSystemReports:
 
     def show_version(self, state, output):
         """Display Nokia SR OS formatted 'show version'."""
-        chassis_type = "7220 IXR-D2L"
+        chassis_type = "Chassis"
         chassis_path = build_path('/platform/chassis')
         try:
             ch_data = state.server.get_data_store(DataStore.State).get_data(chassis_path, recursive=True)
@@ -25,8 +25,8 @@ class SrosSystemReports:
         except Exception:
             pass
 
-        sw_version = "26.3.1"
-        last_booted = "2026-09-02T20:32:38.586Z"
+        sw_version = "N/A"
+        last_booted = ""
         sys_info_path = build_path('/system/information')
         try:
             sys_data = state.server.get_data_store(DataStore.State).get_data(sys_info_path, recursive=True)
@@ -42,13 +42,13 @@ class SrosSystemReports:
         output.print_line("=" * 79)
         output.print_line(f"SRLinux-{sw_version} both/{arch} Nokia {chassis_type} Copyright (c) 2000-2026 Nokia.")
         output.print_line("All rights reserved. All use subject to applicable license agreements.")
-        output.print_line(f"Built on {last_booted}")
+        output.print_line(f"Built on {last_booted if last_booted else 'N/A'}")
         output.print_line("=" * 79)
         output.print_line("\nTry SR Linux command: show version")
 
     def show_system_information(self, state, output):
         """Display Nokia SR OS formatted 'show system information'."""
-        hostname = "leaf"
+        hostname = "unknown"
         name_path = build_path('/system/name')
         try:
             name_data = state.server.get_data_store(DataStore.State).get_data(name_path, recursive=True)
@@ -112,6 +112,33 @@ class SrosSystemReports:
         except Exception:
             pass
 
+        # Dynamically query SSH server state
+        ssh_status = "Disabled"
+        try:
+            ssh_path = build_path('/system/ssh-server[name=*]')
+            ssh_data = state.server.get_data_store(DataStore.State).get_data(ssh_path, recursive=True)
+            for s in ssh_data.system.get().ssh_server.items():
+                admin_st = getattr(s, 'admin_state', 'disable')
+                oper_st = getattr(s, 'oper_state', 'down')
+                if admin_st == 'enable' or oper_st == 'up':
+                    ssh_status = "Enabled"
+                    break
+        except Exception:
+            pass
+
+        # Dynamically query SNMP engine ID and operational state
+        snmp_engine_id = ""
+        try:
+            snmp_path = build_path('/system/snmp/network-instance[name=*]')
+            snmp_data = state.server.get_data_store(DataStore.State).get_data(snmp_path, recursive=True)
+            for ni in snmp_data.system.get().snmp.get().network_instance.items():
+                eid = getattr(ni, 'engine_id', None)
+                if eid:
+                    snmp_engine_id = str(eid)
+                    break
+        except Exception:
+            pass
+
         output.print_line("=" * 79)
         output.print_line("System Information")
         output.print_line("=" * 79)
@@ -122,17 +149,17 @@ class SrosSystemReports:
         output.print_line(f"System Active Slot     : {active_slot}")
         output.print_line(f"System Up Time         : {uptime_str}")
         output.print_line("SNMP Port              : 161")
-        output.print_line("SNMP Engine ID         : ")
+        output.print_line(f"SNMP Engine ID         : {snmp_engine_id}")
         output.print_line("SNMP Max Message Size  : 1500")
         output.print_line("Telnet Server          : Disabled")
-        output.print_line("SSH Server             : Enabled")
+        output.print_line(f"SSH Server             : {ssh_status}")
         output.print_line(f"System Current Time    : {current_time_str}")
         output.print_line("=" * 79)
         output.print_line("\nTry SR Linux command: info from state system information")
 
     def show_chassis(self, state, output):
         """Display Nokia SR OS formatted 'show chassis'."""
-        hostname = "leaf"
+        hostname = "unknown"
         name_path = build_path('/system/name')
         try:
             name_data = state.server.get_data_store(DataStore.State).get_data(name_path, recursive=True)
@@ -142,7 +169,7 @@ class SrosSystemReports:
         except Exception:
             pass
 
-        chassis_type = "7220 IXR-D2L"
+        chassis_type = "Chassis"
         serial = ""
         clei = ""
         oper_state = "up"
@@ -174,19 +201,19 @@ class SrosSystemReports:
         except Exception:
             pass
 
-        fan_count = 1
+        fan_count = 0
         fan_path = build_path('/platform/fan-tray[id=*]')
         try:
             f_data = state.server.get_data_store(DataStore.State).get_data(fan_path, recursive=True)
-            fan_count = len(list(f_data.platform.get().fan_tray.items())) or 1
+            fan_count = len(list(f_data.platform.get().fan_tray.items()))
         except Exception:
             pass
 
-        psu_count = 2
+        psu_count = 0
         psu_path = build_path('/platform/power-supply[id=*]')
         try:
             p_data = state.server.get_data_store(DataStore.State).get_data(psu_path, recursive=True)
-            psu_count = len(list(p_data.platform.get().power_supply.items())) or 2
+            psu_count = len(list(p_data.platform.get().power_supply.items()))
         except Exception:
             pass
 

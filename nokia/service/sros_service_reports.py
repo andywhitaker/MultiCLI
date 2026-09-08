@@ -55,7 +55,7 @@ class SrosServiceReports:
                 sros_type = "VPLS" if ntype == 'mac-vrf' else "VPRN"
                 adm = "Up" if getattr(ni, 'admin_state', 'enable') == 'enable' else "Down"
                 opr = "Up" if getattr(ni, 'oper_state', 'up') == 'up' else "Down"
-                services.append((str(svc_id), sros_type, adm, opr, "1", name))
+                services.append((str(svc_id), sros_type, adm, opr, "NA", name))
                 svc_id += 1
         except Exception:
             pass

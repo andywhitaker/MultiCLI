@@ -116,7 +116,16 @@ class SrosInterfaceReports:
                 lid = str(l.name).replace('lag', '') or '1'
                 adm = "up" if getattr(l, 'admin_state', '') == 'enable' else "down"
                 opr = "up" if getattr(l, 'oper_state', '') == 'up' else "down"
-                output.print_line(f"{lid:<10}{adm:<8}{opr:<8}{'No':<10}{'0':<11}{'0':<9}{'N/A'}")
+                threshold = "0"
+                up_count = 0
+                if hasattr(l, 'lag') and l.lag.exists():
+                    lag_obj = l.lag.get()
+                    threshold = str(getattr(lag_obj, 'min_links', 0))
+                    if hasattr(lag_obj, 'member'):
+                        for mem in lag_obj.member.items():
+                            if getattr(mem, 'oper_state', '') == 'up':
+                                up_count += 1
+                output.print_line(f"{lid:<10}{adm:<8}{opr:<8}{'No':<10}{threshold:<11}{str(up_count):<9}{'N/A'}")
 
         output.print_line("=" * 79)
         output.print_line("\nTry SR Linux command: show lag")

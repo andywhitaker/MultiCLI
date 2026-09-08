@@ -267,7 +267,24 @@ class SrosRoutingReports:
                                     ip = getattr(n, 'ipv4_address', None)
                                     mac = getattr(n, 'link_layer_address', None)
                                     if ip and mac:
-                                        entries.append((str(ip), str(mac), "03h59m50s", "Dynamic", full_intf))
+                                        origin = str(getattr(n, 'origin', 'dynamic')).lower()
+                                        exp_time = getattr(n, 'expiration_time', None)
+                                        exp_str = "--"
+                                        if exp_time and origin != 'static':
+                                            try:
+                                                ts_str = str(exp_time).split('(')[0].strip()
+                                                if ts_str.endswith('Z'):
+                                                    ts_str = ts_str[:-1] + '+00:00'
+                                                exp_dt = datetime.datetime.fromisoformat(ts_str)
+                                                now = datetime.datetime.now(datetime.timezone.utc)
+                                                rem_seconds = max(0, int((exp_dt - now).total_seconds()))
+                                                h, r = divmod(rem_seconds, 3600)
+                                                m, s = divmod(r, 60)
+                                                exp_str = f"{h:02d}h{m:02d}m{s:02d}s"
+                                            except Exception:
+                                                exp_str = "00h00m00s"
+                                        atype = "Static" if origin == 'static' else "Dynamic"
+                                        entries.append((str(ip), str(mac), exp_str, atype, full_intf))
         except Exception:
             pass
 
@@ -306,7 +323,9 @@ class SrosRoutingReports:
                                                     rid = str(getattr(n, 'router_id', '--'))
                                                     st = str(getattr(n, 'adjacency_state', '--')).split(':')[-1].capitalize()
                                                     pri = str(getattr(n, 'priority', 1))
-                                                    entries.append((iname, rid, st, pri, "0", "35"))
+                                                    retx = str(getattr(n, 'retransmission_queue_length', 0))
+                                                    dead = str(getattr(n, 'dead_time', '--'))
+                                                    entries.append((iname, rid, st, pri, retx, dead))
         except Exception:
             pass
 
@@ -342,10 +361,14 @@ class SrosRoutingReports:
                                     adj_list = getattr(iface, 'adjacency', None)
                                     if adj_list:
                                         for adj in adj_list.items():
-                                            sys_id = str(getattr(adj, 'system_id', '--'))
-                                            st = str(getattr(adj, 'adjacency_state', 'Up')).capitalize()
-                                            hold = str(getattr(adj, 'hold_time', 30))
-                                            entries.append((iname, sys_id, "2", st, hold, hold))
+                                            sys_id = str(getattr(adj, 'neighbor_system_id', getattr(adj, 'neighbor_hostname', getattr(adj, 'system_id', '--'))))
+                                            lvl_val = str(getattr(adj, 'adjacency_level', '2'))
+                                            lvl = lvl_val.replace('level-', '').replace('L', '') if lvl_val in ('L1', 'L2') else ('3' if lvl_val == 'L1L2' else lvl_val)
+                                            st = str(getattr(adj, 'state', getattr(adj, 'adjacency_state', 'Up'))).capitalize()
+                                            rem_hold = getattr(adj, 'remaining_holdtime', None)
+                                            hold = str(rem_hold if rem_hold is not None else getattr(adj, 'hold_time', 30))
+                                            exp = str(rem_hold if rem_hold is not None else hold)
+                                            entries.append((iname, sys_id, lvl, st, hold, exp))
         except Exception:
             pass
 

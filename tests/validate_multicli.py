@@ -339,6 +339,8 @@ TEST_SUITES = {
             ("show chassis", "Cannot create node", "show chassis should not raise plugin load errors"),
             ("show version", "TiMOS", "show version should not output TiMOS - must accurately report SR Linux"),
             ("show version", "panos", "show version should not output synthetic SROS panos build path"),
+            ("show system information", "2026-09-02T20:32:38.586Z", "show system information must not output hardcoded boot timestamp"),
+            ("show router arp", "03h59m50s", "show router arp must not contain hardcoded 03h59m50s expiry"),
         ],
         "positive_assertions": [
             ("show version", "SRLinux-", "show version must output authentic SRLinux banner in SROS format"),
@@ -359,6 +361,7 @@ TEST_SUITES = {
             ("show router arp", "ARP Table (Router: default)", "show router arp must display ARP table"),
             ("show router bgp summary", "BGP Summary", "show router bgp summary must display BGP summary table"),
             ("show service service-using", "Services [Customer: All]", "show service service-using must display service table"),
+            ("show service service-using", "NA", "show service service-using must display NA for CustomerID"),
             ("show service id app vxlan destinations", "Egress VTEP, VNI", "show service id app vxlan destinations must display VXLAN destinations"),
         ],
     }
