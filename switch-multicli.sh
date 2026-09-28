@@ -12,6 +12,12 @@ TARGET_NOS="${1:-}"
 TARGET_NODE="${2:-leaf1}"
 DEFAULT_PERSONA=""
 
+# Validate target node name
+if [[ ! "$TARGET_NODE" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+    echo "Error: Invalid target node name '$TARGET_NODE'"
+    exit 1
+fi
+
 # Parse optional --default flag
 shift 2 2>/dev/null || true
 while [[ $# -gt 0 ]]; do
@@ -51,6 +57,16 @@ if [ -z "$DEFAULT_PERSONA" ]; then
         *) DEFAULT_PERSONA="arista" ;;
     esac
 fi
+
+# Validate default persona
+case "$DEFAULT_PERSONA" in
+    arista|cisco|juniper|nokia|none|all)
+        ;;
+    *)
+        echo "Error: Invalid default persona '$DEFAULT_PERSONA'. Must be arista, cisco, juniper, nokia, none, or all."
+        exit 1
+        ;;
+esac
 
 # Determine target directory or docker mode
 TARGET_CLI_DIR=""
@@ -167,12 +183,13 @@ if os.path.exists(manifest_path):
     for v in "${VENDORS[@]}"; do
         docker cp "$SCRIPT_DIR/$v"/. "$TARGET_NODE":/etc/opt/srlinux/cli/
     done
-    docker exec "$TARGET_NODE" bash -c "echo '$DEFAULT_PERSONA' > /etc/opt/srlinux/cli/default_persona"
+    docker exec "$TARGET_NODE" sh -c 'printf "%s\n" "$1" > /etc/opt/srlinux/cli/default_persona' _ "$DEFAULT_PERSONA"
 
     # Generate .multicli_manifest.json dynamically from installed vendors
-    docker exec "$TARGET_NODE" python3 -c "
-import os, json
+    docker exec -i "$TARGET_NODE" python3 - "$DEFAULT_PERSONA" << 'PYEOF'
+import os, json, sys
 cli_dir = '/etc/opt/srlinux/cli'
+default_persona = sys.argv[1] if len(sys.argv) > 1 else 'none'
 files = []
 dirs = []
 for root, d_list, f_list in os.walk(cli_dir):
@@ -190,19 +207,19 @@ for root, d_list, f_list in os.walk(cli_dir):
 
 manifest = {
     'version': '0.2.0',
-    'installed_persona': '$DEFAULT_PERSONA',
+    'installed_persona': default_persona,
     'installed_files': sorted(set(files)),
     'installed_dirs': sorted(set(dirs))
 }
 with open(os.path.join(cli_dir, '.multicli_manifest.json'), 'w') as fp:
     json.dump(manifest, fp, indent=2)
-"
+PYEOF
     echo "==> Successfully installed [${VENDORS[*]}] to $TARGET_NODE via docker cp."
 else
     mkdir -p "$TARGET_CLI_DIR"/plugins
-    python3 -c "
-import os, json
-cli_dir = '$TARGET_CLI_DIR'
+    python3 - "$TARGET_CLI_DIR" << 'PYEOF' 2>/dev/null || true
+import os, json, sys
+cli_dir = sys.argv[1]
 manifest_path = os.path.join(cli_dir, '.multicli_manifest.json')
 legacy_files = {
     'plugins/main_arista.py', 'plugins/main_cisco.py', 'plugins/main_juniper.py', 'plugins/main_nokia.py',
@@ -236,16 +253,17 @@ for d in sorted(dirs_to_clean - {'plugins', '.'}, key=len, reverse=True):
 if os.path.exists(manifest_path):
     try: os.remove(manifest_path)
     except Exception: pass
-" 2>/dev/null || true
+PYEOF
     find "$TARGET_CLI_DIR"/plugins -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
     mkdir -p "$TARGET_CLI_DIR"/plugins
     for v in "${VENDORS[@]}"; do
         cp -r "$SCRIPT_DIR/$v"/* "$TARGET_CLI_DIR"/
     done
-    echo "$DEFAULT_PERSONA" > "$TARGET_CLI_DIR"/default_persona
-    python3 -c "
-import os, json
-cli_dir = '$TARGET_CLI_DIR'
+    printf "%s\n" "$DEFAULT_PERSONA" > "$TARGET_CLI_DIR"/default_persona
+    python3 - "$TARGET_CLI_DIR" "$DEFAULT_PERSONA" << 'PYEOF'
+import os, json, sys
+cli_dir = sys.argv[1]
+default_persona = sys.argv[2] if len(sys.argv) > 2 else 'none'
 files = []
 dirs = []
 for root, d_list, f_list in os.walk(cli_dir):
@@ -261,13 +279,13 @@ for root, d_list, f_list in os.walk(cli_dir):
 
 manifest = {
     'version': '0.2.0',
-    'installed_persona': '$DEFAULT_PERSONA',
+    'installed_persona': default_persona,
     'installed_files': sorted(set(files)),
     'installed_dirs': sorted(set(dirs))
 }
 with open(os.path.join(cli_dir, '.multicli_manifest.json'), 'w') as fp:
     json.dump(manifest, fp, indent=2)
-"
+PYEOF
     echo "==> Successfully installed [${VENDORS[*]}] to $TARGET_NODE ($TARGET_CLI_DIR)."
 fi
 

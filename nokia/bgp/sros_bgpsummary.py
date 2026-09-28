@@ -515,27 +515,25 @@ class SrosBgpNeighborFormatter(Formatter):
         yield line
 
     def _get_time(self, time_value):
-        
-        if time_value != 0:
-            # Given time value in ISO 8601 format "2025-03-08T23:29:45.900Z"
-            # Parse the given time value to a datetime object
-            given_time = datetime.strptime(time_value, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+        if time_value != 0 and time_value:
+            try:
+                # Given time value in ISO 8601 format (e.g. "2025-03-08T23:29:45.900Z")
+                ts_str = str(time_value).replace("Z", "+00:00")
+                given_time = datetime.fromisoformat(ts_str)
+                if not given_time.tzinfo:
+                    given_time = given_time.replace(tzinfo=timezone.utc)
 
-            # Get the current time in UTC
-            current_time = datetime.now(timezone.utc)
+                # Get the current time in UTC
+                current_time = datetime.now(timezone.utc)
+                time_difference = current_time - given_time
 
-            # Calculate the difference between the current time and the given time
-            time_difference = current_time - given_time
-
-            # Extract hours, minutes, and seconds from the time difference
-            total_seconds = int(time_difference.total_seconds())
-            hours, remainder = divmod(total_seconds, 3600)
-            minutes, seconds = divmod(remainder, 60)
-
-            # Format the output as 00h04m10s
-            formatted_output = f"{hours:02}h{minutes:02}m{seconds:02}s"
-
-        elif time_value == 0:
+                total_seconds = max(0, int(time_difference.total_seconds()))
+                hours, remainder = divmod(total_seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                formatted_output = f"{hours:02}h{minutes:02}m{seconds:02}s"
+            except Exception:
+                formatted_output = "00h00m00s"
+        else:
             formatted_output = ""
 
         return formatted_output

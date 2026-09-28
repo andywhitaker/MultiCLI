@@ -38,6 +38,10 @@ for ARCH in "${ARCH_LIST[@]}"; do
     # Copy source tree
     cp -r "$SCRIPT_DIR/src/." "$BUILD_ROOT/"
 
+    # Strip any compiled bytecode
+    find "$BUILD_ROOT" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+    find "$BUILD_ROOT" -type f -name "*.py[cod]" -delete 2>/dev/null || true
+
     # Set permissions
     find "$BUILD_ROOT" -type d -exec chmod 755 {} +
     find "$BUILD_ROOT/etc" "$BUILD_ROOT/tmp" -type f -exec chmod 644 {} +

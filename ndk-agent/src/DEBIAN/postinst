@@ -10,7 +10,7 @@ elif [ -d "${PYBASE}/python3.11" ]; then
     PYVER="python3.11"
 else
     # Fallback: buscar dinámicamente
-    PYVER=$(ls "${PYBASE}" | grep "^python3\." | sort -V | tail -1)
+    PYVER=$(ls "${PYBASE}" 2>/dev/null | grep "^python3\." | sort -V | tail -1 || true)
 fi
 
 SITE_PACKAGES="${PYBASE}/${PYVER}/dist-packages"

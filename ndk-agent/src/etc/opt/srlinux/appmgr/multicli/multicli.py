@@ -16,6 +16,7 @@ import re
 import subprocess
 import netns
 import shutil
+import tempfile
 from typing import Any
 
 ## NDK 0.5.0 gRPC Services
@@ -39,7 +40,6 @@ enabled_nos_command = 'enabled-nos'
 repo_url_command = 'repo-url'
 
 # Repo and folders
-tmp_dir = "/tmp/multicli_tmp"
 cli_plugins_dir = "/etc/opt/srlinux/cli"
 required_dirs = {"arista", "cisco-nx", "juniper", "nokia"}
 
@@ -320,7 +320,9 @@ def clean_multicli_assets(target_dir=cli_plugins_dir):
     # Clean stale __pycache__ inside plugins without deleting other plugins
     plugins_dir = os.path.join(target_dir, "plugins")
     if os.path.isdir(plugins_dir):
-        subprocess.run(f"find {plugins_dir} -type d -name '__pycache__' -exec rm -rf {{}} + 2>/dev/null || true", shell=True)
+        for root, dirs, _ in os.walk(plugins_dir):
+            if "__pycache__" in dirs:
+                shutil.rmtree(os.path.join(root, "__pycache__"), ignore_errors=True)
 
 
 def copy_with_manifest(source_dirs, target_dir, persona):
@@ -374,65 +376,62 @@ def multicli_function(selected_nos, seleceted_repo_url):
     if selected_nos != 'none':
 
         with netns.NetNS(nsname="srbase-mgmt"): # Using the mgmt network-instance to connect to the repo-url
-
-            os.makedirs(tmp_dir, exist_ok=True) # Creating tmp folder
-            logging.info(f"Cloning MultiCLI Repo from {seleceted_repo_url}")
-            zip_path = os.path.join(tmp_dir, "repo.zip")
-            try:
-                # Downloading repo
-                subprocess.run(["/usr/bin/curl", "-L", "--retry", "3","--retry-delay", "2","--retry-all-errors", "--connect-timeout", "10", "--max-time", "60", "-k", "-o", zip_path, seleceted_repo_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, env=os.environ)
-                logging.info(f"Unzipping Repo...")
-
+            with tempfile.TemporaryDirectory(prefix="multicli_") as tmp_dir:
+                logging.info(f"Cloning MultiCLI Repo from {seleceted_repo_url}")
+                zip_path = os.path.join(tmp_dir, "repo.zip")
                 try:
-                    # Unzipping repo
-                    subprocess.run(["unzip", "-o", zip_path, "-d", tmp_dir], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-                    logging.info(f"Unzipping Completed!")
-                    # Validating zip file dynamically
-                    extracted_root = None
-                    for item in os.listdir(tmp_dir):
-                        full = os.path.join(tmp_dir, item)
-                        if os.path.isdir(full) and item.startswith("MultiCLI"):
-                            extracted_root = full
-                            break
-                    if not extracted_root:
-                        extracted_root = os.path.join(tmp_dir, "MultiCLI-main")
+                    # Downloading repo (TLS certificate verification enforced)
+                    subprocess.run(["/usr/bin/curl", "-L", "--retry", "3", "--retry-delay", "2", "--retry-all-errors", "--connect-timeout", "10", "--max-time", "60", "-o", zip_path, "--", seleceted_repo_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, env=os.environ)
+                    logging.info(f"Unzipping Repo...")
 
-                    present_dirs = {name for name in os.listdir(extracted_root) if os.path.isdir(os.path.join(extracted_root, name))}
-                    missing = required_dirs - present_dirs
-                    if missing: # Corrupted file or a non-MultiCLI zip
-                        logging.info("The downloaded MultiCLI repository is corrupted")
-                        update_state_datastore(js_path='.multicli', js_data=json.dumps({"enabled-nos": selected_nos, "repo-url": seleceted_repo_url, "error-messages": "The downloaded MultiCLI repository is corrupted"}))
-                    else:
-                        logging.info(f"Copying files for the Selected NOS: {selected_nos}")
+                    try:
+                        # Unzipping repo
+                        subprocess.run(["unzip", "-o", zip_path, "-d", tmp_dir], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+                        logging.info(f"Unzipping Completed!")
+                        # Validating zip file dynamically
+                        extracted_root = None
+                        for item in os.listdir(tmp_dir):
+                            full = os.path.join(tmp_dir, item)
+                            if os.path.isdir(full) and item.startswith("MultiCLI"):
+                                extracted_root = full
+                                break
+                        if not extracted_root:
+                            extracted_root = os.path.join(tmp_dir, "MultiCLI-main")
 
-                        # Clean previous MultiCLI assets safely
-                        clean_multicli_assets(cli_plugins_dir)
+                        present_dirs = {name for name in os.listdir(extracted_root) if os.path.isdir(os.path.join(extracted_root, name))}
+                        missing = required_dirs - present_dirs
+                        if missing: # Corrupted file or a non-MultiCLI zip
+                            logging.info("The downloaded MultiCLI repository is corrupted")
+                            update_state_datastore(js_path='.multicli', js_data=json.dumps({"enabled-nos": selected_nos, "repo-url": seleceted_repo_url, "error-messages": "The downloaded MultiCLI repository is corrupted"}))
+                        else:
+                            logging.info(f"Copying files for the Selected NOS: {selected_nos}")
 
-                        match selected_nos:
-                            case 'nokia-sros':
-                                copy_with_manifest([os.path.join(extracted_root, "nokia")], cli_plugins_dir, 'nokia')
-                            case 'arista':
-                                copy_with_manifest([os.path.join(extracted_root, "arista")], cli_plugins_dir, 'arista')
-                            case 'juniper':
-                                copy_with_manifest([os.path.join(extracted_root, "juniper")], cli_plugins_dir, 'juniper')
-                            case 'cisco':
-                                copy_with_manifest([os.path.join(extracted_root, "cisco-nx")], cli_plugins_dir, 'cisco')
-                            case 'all':
-                                all_vendor_dirs = [os.path.join(extracted_root, d) for d in ['arista', 'cisco-nx', 'juniper', 'nokia']]
-                                copy_with_manifest(all_vendor_dirs, cli_plugins_dir, 'none')
+                            # Clean previous MultiCLI assets safely
+                            clean_multicli_assets(cli_plugins_dir)
 
-                        logging.info(f"Deleting temp folder...")
-                        subprocess.run(f"rm -rf {tmp_dir}", shell=True, check=True)
-                        logging.info(f"MultiCLI {selected_nos} commands enabled! Enjoy!")
-                        update_state_datastore(js_path='.multicli', js_data=json.dumps({"enabled-nos": selected_nos, "repo-url": seleceted_repo_url, "error-messages": "No errors"}))
+                            match selected_nos:
+                                case 'nokia-sros':
+                                    copy_with_manifest([os.path.join(extracted_root, "nokia")], cli_plugins_dir, 'nokia')
+                                case 'arista':
+                                    copy_with_manifest([os.path.join(extracted_root, "arista")], cli_plugins_dir, 'arista')
+                                case 'juniper':
+                                    copy_with_manifest([os.path.join(extracted_root, "juniper")], cli_plugins_dir, 'juniper')
+                                case 'cisco':
+                                    copy_with_manifest([os.path.join(extracted_root, "cisco-nx")], cli_plugins_dir, 'cisco')
+                                case 'all':
+                                    all_vendor_dirs = [os.path.join(extracted_root, d) for d in ['arista', 'cisco-nx', 'juniper', 'nokia']]
+                                    copy_with_manifest(all_vendor_dirs, cli_plugins_dir, 'none')
+
+                            logging.info(f"MultiCLI {selected_nos} commands enabled! Enjoy!")
+                            update_state_datastore(js_path='.multicli', js_data=json.dumps({"enabled-nos": selected_nos, "repo-url": seleceted_repo_url, "error-messages": "No errors"}))
+
+                    except subprocess.CalledProcessError as e:
+                        logging.error(f"Failed - {zip_path}: {e.stderr.strip()}")
+                        update_state_datastore(js_path='.multicli', js_data=json.dumps({"enabled-nos": selected_nos, "repo-url": seleceted_repo_url, "error-messages": "Please verify the repo-url or the ZIP file provided in the repository"}))
 
                 except subprocess.CalledProcessError as e:
-                    logging.error(f"Failed - {zip_path}: {e.stderr.strip()}")
-                    update_state_datastore(js_path='.multicli', js_data=json.dumps({"enabled-nos": selected_nos, "repo-url": seleceted_repo_url, "error-messages": "Please verify the repo-url or the ZIP file provided in the repository"}))
-
-            except subprocess.CalledProcessError as e:
-                logging.error(f"Failed: {e.stderr.strip()}")
-                update_state_datastore(js_path='.multicli', js_data=json.dumps({"enabled-nos": selected_nos, "repo-url": seleceted_repo_url, "error-messages": "Verify DNS configuration and repository reachability via mgmt network-instance"}))
+                    logging.error(f"Failed: {e.stderr.strip()}")
+                    update_state_datastore(js_path='.multicli', js_data=json.dumps({"enabled-nos": selected_nos, "repo-url": seleceted_repo_url, "error-messages": "Verify DNS configuration and repository reachability via mgmt network-instance"}))
 
 ########################################################################################################################
 

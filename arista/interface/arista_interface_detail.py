@@ -21,7 +21,7 @@ from srlinux.data import Border, ColumnFormatter, TagValueFormatter, Borders, Da
 from srlinux.syntax.value_checkers import IntegerValueInRangeChecker
 import json
 from jinja2 import Template
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class InterfaceDetails(object):
@@ -34,9 +34,14 @@ class InterfaceDetails(object):
 
 
     def _timedelta_str(self, timestamp):
-        last_chg_time = datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%S.%fZ")
-        diff = datetime.utcnow() - last_chg_time
-        seconds = int(diff.total_seconds())
+        try:
+            ts_str = str(timestamp).replace("Z", "+00:00")
+            last_chg_time = datetime.fromisoformat(ts_str)
+            now = datetime.now(timezone.utc) if last_chg_time.tzinfo else datetime.utcnow()
+            diff = now - last_chg_time
+            seconds = max(0, int(diff.total_seconds()))
+        except Exception:
+            return "never"
 
         days, seconds = divmod(seconds, 86400)
         hours, seconds = divmod(seconds, 3600)

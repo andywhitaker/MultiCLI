@@ -497,7 +497,7 @@ def run_suite(suite_name, suite, args, parallel=True):
 
     return passed, failed, failures
 
-def validate_recommended_srl_commands(target_nodes="leaf1"):
+def validate_recommended_srl_commands(target_nodes="leaf1", parallel=True):
     """
     Validate that all recommended SR Linux commands suggested in the output
     footers of MultiCLI show commands are syntactically valid and executable
@@ -542,12 +542,12 @@ def validate_recommended_srl_commands(target_nodes="leaf1"):
         "show tunnel-interface vxlan-interface bridge-table unicast-destinations destination",
     ]
 
-    total_passed = 0
-    total_failed = 0
-    failures = []
-
-    for target_node in target_nodes:
-        print(f"\n--- Validating {len(recommended_commands)} Recommended SR Linux Commands on '{target_node}' ---")
+    def _validate_node(target_node):
+        node_passed = 0
+        node_failed = 0
+        node_failures = []
+        with print_lock:
+            print(f"\n--- Validating {len(recommended_commands)} Recommended SR Linux Commands on '{target_node}' ---")
         for idx, cmd in enumerate(recommended_commands, 1):
             rc, stdout, stderr, dt = run_command(target_node, cmd)
             out = stdout + stderr
@@ -564,20 +564,41 @@ def validate_recommended_srl_commands(target_nodes="leaf1"):
             if not stdout.strip() and not stderr.strip() and "isis" not in cmd:
                 errors.append("Output is completely empty")
 
-            if errors:
-                total_failed += 1
-                failures.append({
-                    "suite": "Recommended SRL Commands",
-                    "node": target_node,
-                    "command": cmd,
-                    "errors": errors,
-                    "stdout": stdout,
-                    "stderr": stderr
-                })
-                print(f"  [{target_node}] [{idx:2d}/{len(recommended_commands):2d}] {cmd:<60} -> FAIL ({dt:.2f}s) - {'; '.join(errors)}")
-            else:
-                total_passed += 1
-                print(f"  [{target_node}] [{idx:2d}/{len(recommended_commands):2d}] {cmd:<60} -> PASS ({dt:.2f}s)")
+            with print_lock:
+                if errors:
+                    node_failed += 1
+                    node_failures.append({
+                        "suite": "Recommended SRL Commands",
+                        "node": target_node,
+                        "command": cmd,
+                        "errors": errors,
+                        "stdout": stdout,
+                        "stderr": stderr
+                    })
+                    print(f"  [{target_node}] [{idx:2d}/{len(recommended_commands):2d}] {cmd:<60} -> FAIL ({dt:.2f}s) - {'; '.join(errors)}")
+                else:
+                    node_passed += 1
+                    print(f"  [{target_node}] [{idx:2d}/{len(recommended_commands):2d}] {cmd:<60} -> PASS ({dt:.2f}s)")
+        return node_passed, node_failed, node_failures
+
+    total_passed = 0
+    total_failed = 0
+    failures = []
+
+    if parallel and len(target_nodes) > 1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(target_nodes)) as executor:
+            future_to_node = {executor.submit(_validate_node, node): node for node in target_nodes}
+            for fut in concurrent.futures.as_completed(future_to_node):
+                p, f, fails = fut.result()
+                total_passed += p
+                total_failed += f
+                failures.extend(fails)
+    else:
+        for node in target_nodes:
+            p, f, fails = _validate_node(node)
+            total_passed += p
+            total_failed += f
+            failures.extend(fails)
 
     return total_passed, total_failed, failures
 
@@ -631,7 +652,7 @@ def validate(args):
 
     # Validate all recommended SR Linux commands
     target_nodes = list(dict.fromkeys([args.arista_node, args.cisco_node, args.juniper_node, args.nokia_node]))
-    p_srl, f_srl, fails_srl = validate_recommended_srl_commands(target_nodes)
+    p_srl, f_srl, fails_srl = validate_recommended_srl_commands(target_nodes, parallel=not getattr(args, 'sequential', False))
     total_passed += p_srl
     total_failed += f_srl
     all_failures.extend(fails_srl)
