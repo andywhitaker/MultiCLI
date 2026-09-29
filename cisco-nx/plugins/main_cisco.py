@@ -133,22 +133,6 @@ class Plugin(CliPlugin):
         self._add_or_override(intf_node, Syntax('description', help='Interface description in Cisco NX-OS format'), callback=self._print_interface_description, update_location=False)
         xcvr = self._add_or_override(intf_node, Syntax('transceiver', help='Transceiver details in Cisco NX-OS format'), callback=self._print_interface_transceiver, update_location=False)
         self._add_or_override(xcvr, Syntax('details', help='Transceiver details'), callback=self._print_interface_transceiver_details, update_location=False)
-        self._add_or_override(xcvr, Syntax('detail', help='Transceiver details'), callback=self._print_interface_transceiver_details, update_location=False)
-
-        # Also support plural 'interfaces'
-        intfs_syntax = Syntax('interfaces', help='Interface status and information')
-        intfs_syntax.add_unnamed_argument(
-            'name',
-            default='*',
-            suggestions=MultipleKeyCompleters(keycompleters=[KeyCompleter(path="/interface[name=*]")])
-        )
-        intfs_node = self._add_or_override(target, intfs_syntax, callback=self._print_interface_detail, update_location=False)
-        self._add_or_override(intfs_node, Syntax('brief', help='Interface brief in Cisco NX-OS format'), callback=self._print_interface_brief, update_location=False)
-        self._add_or_override(intfs_node, Syntax('status', help='Interface status in Cisco NX-OS format'), callback=self._print_interface_status, update_location=False)
-        self._add_or_override(intfs_node, Syntax('description', help='Interface description in Cisco NX-OS format'), callback=self._print_interface_description, update_location=False)
-        xcvrs = self._add_or_override(intfs_node, Syntax('transceiver', help='Transceiver details in Cisco NX-OS format'), callback=self._print_interface_transceiver, update_location=False)
-        self._add_or_override(xcvrs, Syntax('details', help='Transceiver details'), callback=self._print_interface_transceiver_details, update_location=False)
-        self._add_or_override(xcvrs, Syntax('detail', help='Transceiver details'), callback=self._print_interface_transceiver_details, update_location=False)
 
         # IPv6 Commands: show ipv6 interface brief
         ipv6_node = self._add_or_override(target, Syntax('ipv6', help='IPv6 protocol information'), update_location=False)
@@ -159,13 +143,10 @@ class Plugin(CliPlugin):
         pc_node = self._add_or_override(target, Syntax('port-channel', help='Port-Channel information'), update_location=False)
         self._add_or_override(pc_node, Syntax('summary', help='Port-Channel summary in Cisco NX-OS format'), callback=self._print_port_channel_summary, update_location=False)
 
-        # 3. LLDP Commands: show lldp neighbors, show lldp neighbor
+        # 3. LLDP Commands: show lldp neighbors
         lldp_node = self._add_or_override(target, Syntax('lldp', help='LLDP information'), update_location=False)
         lldp_neigh = self._add_or_override(lldp_node, Syntax('neighbors', help='LLDP neighbors in Cisco NX-OS format'), callback=self._print_lldp_neighbors, update_location=False)
         self._add_or_override(lldp_neigh, Syntax('detail', help='LLDP neighbors detail in Cisco NX-OS format'), callback=self._print_lldp_neighbors_detail, update_location=False)
-        # Singular alias
-        lldp_single = self._add_or_override(lldp_node, Syntax('neighbor', help='LLDP neighbors in Cisco NX-OS format'), callback=self._print_lldp_neighbors, update_location=False)
-        self._add_or_override(lldp_single, Syntax('detail', help='LLDP neighbors detail in Cisco NX-OS format'), callback=self._print_lldp_neighbors_detail, update_location=False)
 
         # 4. IP Commands: show ip route, show ip interface brief, show ip bgp, show ip arp, show ip ospf
         ip_node = self._add_or_override(target, Syntax('ip', help='IP protocol information'), update_location=False)

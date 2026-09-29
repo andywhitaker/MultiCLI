@@ -385,39 +385,6 @@ class Plugin(CliPlugin):
             update_location=False
         )
 
-        # Also support on 'interface' singular
-        intf_singular = self._add_or_override(
-            target,
-            InterfaceDetails().get_syntax_details(),
-            callback=self._interface_details,
-            update_location=False
-        )
-        self._add_or_override(
-            intf_singular,
-            InterfaceStatus().get_syntax_status(),
-            update_location=False,
-            callback=self._interface_status,
-            schema=InterfaceStatus().get_data_schema()
-        )
-        self._add_or_override(
-            intf_singular,
-            Syntax('description', help='Interface descriptions'),
-            callback=self._print_interfaces_description,
-            update_location=False
-        )
-        s_xcvr = self._add_or_override(
-            intf_singular,
-            Syntax('transceiver', help='Transceiver and DDM status in Arista EOS format'),
-            callback=self._print_interfaces_transceiver,
-            update_location=False
-        )
-        self._add_or_override(
-            s_xcvr,
-            Syntax('detail', help='Transceiver detail'),
-            callback=self._print_interfaces_transceiver_detail,
-            update_location=False
-        )
-
         # 5. LLDP Commands
         lldp_node = self._add_or_override(
             target,
@@ -432,18 +399,6 @@ class Plugin(CliPlugin):
         )
         self._add_or_override(
             lldp_neigh,
-            Syntax('detail', help='LLDP neighbors detail'),
-            callback=self._print_lldp_neighbors_detail,
-            update_location=False
-        )
-        lldp_single = self._add_or_override(
-            lldp_node,
-            Syntax('neighbor', help='LLDP neighbors in Arista format'),
-            callback=self._print_lldp_neighbors,
-            update_location=False
-        )
-        self._add_or_override(
-            lldp_single,
             Syntax('detail', help='LLDP neighbors detail'),
             callback=self._print_lldp_neighbors_detail,
             update_location=False
