@@ -19,8 +19,10 @@ MultiCLI allows users to execute familiar Arista EOS commands on Nokia SR Linux 
 | Command | Description |
 |---|---|
 | `show ip interface brief` | IPv4 address and operational status per interface |
-| `show interfaces description` / `show interface description` | Interface descriptions and line protocol status |
-| `show interfaces transceiver [detail]` / `show interface transceiver [detail]` | Optical transceiver diagnostics and DDM |
+| `show interfaces [<name>]` | Detailed interface operational state and counters |
+| `show interfaces status` | Interface status, VLAN, duplex, speed, and type |
+| `show interfaces description` | Interface descriptions and line protocol status |
+| `show interfaces transceiver [detail]` | Optical transceiver diagnostics and DDM |
 | `show port-channel summary` | LAG / Port-channel summary with protocol and member ports |
 | `show mac address-table` | MAC address table with VLAN, type, and interface |
 | `show vlan` | Configured VLANs, status, and member ports |

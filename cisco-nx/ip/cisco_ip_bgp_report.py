@@ -137,12 +137,12 @@ class IpBgpReport:
                 if hasattr(neighbor, 'received_messages'):
                     rm = neighbor.received_messages.get()
                     if rm and hasattr(rm, 'total_messages'):
-                        messages_received = rm.total_messages
+                        messages_received = rm.total_messages or 0
                         
                 if hasattr(neighbor, 'sent_messages'):
                     sm = neighbor.sent_messages.get()
                     if sm and hasattr(sm, 'total_messages'):
-                        messages_sent = sm.total_messages
+                        messages_sent = sm.total_messages or 0
                 
                 in_q = 0
                 if hasattr(neighbor, 'received_messages'):
@@ -164,7 +164,7 @@ class IpBgpReport:
                             continue
                             
                         if afi_safi.afi_safi_name == 'ipv4-unicast' and hasattr(afi_safi, 'received_routes'):
-                            prefixes_received = afi_safi.received_routes
+                            prefixes_received = afi_safi.received_routes or 0
                             break
                 
                 # Format uptime

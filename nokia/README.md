@@ -2,11 +2,26 @@
 
 The following CLI plugins are available in this repo:
 
-| Command | Contributor |
+| Command | Description / Contributor |
 |---|---|
-| `show router bgp summary` | [giancarlo3g](https://github.com/giancarlo3g) |
-| `show service id <id> evpn-mpls` | [zenodhaene](https://github.com/zenodhaene) |
-| `show service id <id> vxlan` | [zenodhaene](https://github.com/zenodhaene) |
+| `show version` | Nokia SR OS formatted software version and chassis info |
+| `show system information` | System name, uptime, active slot, SSH/SNMP status, and clock |
+| `show chassis` | Chassis hardware, serial number, fan trays, and power supplies |
+| `show port [<id>]` | Port status, link state, MTU, LAG membership, and encapsulation |
+| `show port description` | Port descriptions per slot |
+| `show lag` | LAG operational state, threshold, and active member count |
+| `show system lldp neighbor` | LLDP remote system neighbor information |
+| `show router [<netinst>] route-table` | IPv4 route table with next-hops, protocols, and metrics |
+| `show router [<netinst>] interface` | Router interface table with IPv4/IPv6 addresses and states |
+| `show router [<netinst>] arp` | Router ARP table with dynamic/static type and expiry |
+| `show router [<netinst>] bgp summary` | BGP summary and neighbor statistics ([giancarlo3g](https://github.com/giancarlo3g)) |
+| `show router [<netinst>] ospf neighbor` | OSPFv2 neighbor adjacencies and states |
+| `show router [<netinst>] isis adjacency` | IS-IS adjacencies, levels, and hold timers |
+| `show service service-using` | Configured VPLS (`mac-vrf`) and VPRN (`ip-vrf`) services |
+| `show service fdb mac` | Forwarding database MAC table across all services |
+| `show service id <id> fdb mac` | Forwarding database MAC table for a specific service |
+| `show service id <id> evpn-mpls` | EVPN-MPLS destinations ([zenodhaene](https://github.com/zenodhaene)) |
+| `show service id <id> vxlan destinations` | EVPN-VxLAN destinations ([zenodhaene](https://github.com/zenodhaene)) |
 
 ## Testing
 

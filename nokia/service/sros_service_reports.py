@@ -10,25 +10,32 @@ import datetime
 from srlinux.location import build_path
 from srlinux.schema.data_store import DataStore
 
+def _safe_get(obj, attr, default=None):
+    try:
+        val = getattr(obj, attr, default)
+        return default if val is None else val
+    except Exception:
+        return default
+
+
 def format_sros_age(dt_or_str):
     if not dt_or_str:
         return "00d00h00m"
     try:
-        s = str(dt_or_str).strip()
-        if '(' in s:
-            return s.split('(')[-1].rstrip(')').replace(' ago', '')
-        if 'Z' in s:
-            s = s.replace('Z', '+00:00')
+        s = str(dt_or_str).split('(')[0].strip()
+        if s.endswith('Z'):
+            s = s[:-1] + '+00:00'
         dt = datetime.datetime.fromisoformat(s)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=datetime.timezone.utc)
-        delta = datetime.datetime.now(datetime.timezone.utc) - dt
+        delta = max(datetime.timedelta(0), datetime.datetime.now(datetime.timezone.utc) - dt)
         days = delta.days
         hours = delta.seconds // 3600
         minutes = (delta.seconds % 3600) // 60
         return f"{days:02d}d{hours:02d}h{minutes:02d}m"
     except Exception:
         return "00d00h00m"
+
 
 class SrosServiceReports:
     """Handles classic Nokia SR OS service and FDB show reports."""
@@ -48,13 +55,13 @@ class SrosServiceReports:
             svc_id = 1
             for ni in sorted(data.network_instance.items(), key=lambda x: str(x.name)):
                 name = str(ni.name)
-                ntype = getattr(ni, 'type', 'default')
+                ntype = _safe_get(ni, 'type', 'default')
                 if ntype == 'default':
                     continue
 
                 sros_type = "VPLS" if ntype == 'mac-vrf' else "VPRN"
-                adm = "Up" if getattr(ni, 'admin_state', 'enable') == 'enable' else "Down"
-                opr = "Up" if getattr(ni, 'oper_state', 'up') == 'up' else "Down"
+                adm = "Up" if _safe_get(ni, 'admin_state', 'enable') == 'enable' else "Down"
+                opr = "Up" if _safe_get(ni, 'oper_state', 'up') == 'up' else "Down"
                 services.append((str(svc_id), sros_type, adm, opr, "NA", name))
                 svc_id += 1
         except Exception:
@@ -78,19 +85,27 @@ class SrosServiceReports:
         output.print_line(f"{'':<64}{'Age'}")
         output.print_line("-" * 79)
 
-        # Map mac-vrf names to service IDs
+        # Map non-default network-instance names to sequential service IDs (consistent with show_service_using)
         ni_map = {}
+        id_to_name = {}
         try:
             ni_data = state.server.get_data_store(DataStore.State).get_data(build_path('/network-instance[name=*]'), recursive=False)
             idx = 1
             for ni in sorted(ni_data.network_instance.items(), key=lambda x: str(x.name)):
-                if getattr(ni, 'type', '') == 'mac-vrf':
-                    ni_map[str(ni.name)] = str(idx)
-                    idx += 1
+                if _safe_get(ni, 'type', 'default') == 'default':
+                    continue
+                ni_name = str(ni.name)
+                ni_map[ni_name] = str(idx)
+                id_to_name[str(idx)] = ni_name
+                idx += 1
         except Exception:
             pass
 
-        target_ni = '*' if not service_name or service_name == '*' else service_name
+        if service_name and str(service_name) in id_to_name:
+            target_ni = id_to_name[str(service_name)]
+        else:
+            target_ni = '*' if not service_name or service_name == '*' else service_name
+
         path = build_path(f'/network-instance[name={target_ni}]/bridge-table/mac-table/mac[address=*]')
         entries = []
         try:
@@ -98,19 +113,29 @@ class SrosServiceReports:
             for ni in data.network_instance.items():
                 cur_name = str(ni.name)
                 sid = ni_map.get(cur_name, "1")
-                bt = getattr(ni, 'bridge_table', None)
-                if bt and hasattr(bt.get(), 'mac_table'):
-                    mt = bt.get().mac_table.get()
-                    if hasattr(mt, 'mac'):
-                        for m in mt.mac.items():
-                            addr = str(getattr(m, 'address', ''))
-                            if not addr:
-                                continue
-                            dest = str(getattr(m, 'dest', '') or getattr(m, 'subinterface', '') or '--')
-                            mtype = "Learned" if getattr(m, 'type', 'learned') == 'learned' else "Static"
-                            lup = getattr(m, 'last_update', None)
-                            age = format_sros_age(lup)
-                            entries.append((sid, addr, dest, mtype, age))
+                bt = _safe_get(ni, 'bridge_table')
+                if bt and hasattr(bt, 'get'):
+                    bt_node = bt.get()
+                    mt = _safe_get(bt_node, 'mac_table')
+                    if mt and hasattr(mt, 'get'):
+                        mt_node = mt.get()
+                        mac_list = _safe_get(mt_node, 'mac')
+                        if mac_list and hasattr(mac_list, 'items'):
+                            for m in mac_list.items():
+                                addr = str(_safe_get(m, 'address', '') or '')
+                                if not addr:
+                                    continue
+                                dest = str(_safe_get(m, 'destination', '') or '--')
+                                raw_type = str(_safe_get(m, 'type', 'learned') or 'learned').lower()
+                                if 'learned' in raw_type or 'learnt' in raw_type or 'dynamic' in raw_type:
+                                    mtype = "Learned"
+                                elif 'evpn' in raw_type:
+                                    mtype = "Evpn"
+                                else:
+                                    mtype = "Static"
+                                lup = _safe_get(m, 'last_update', None)
+                                age = format_sros_age(lup)
+                                entries.append((sid, addr, dest, mtype, age))
         except Exception:
             pass
 

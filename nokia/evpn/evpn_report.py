@@ -120,7 +120,16 @@ class EvpnDestinationReport(object):
 
         self._populate_data_mpls(data)
         self._set_formatters(data, arguments, mode="mpls")
-        output.print_data(data)
+        if len(list(data.network.items())) > 0:
+            output.print_data(data)
+        else:
+            empty_tbl = SROSTable("BGP EVPN-MPLS Dest (Instance 1)", "Number of entries: ", 79, [])
+            empty_tbl.set_column_widths([32, 18, 11, 6, 7, 4])
+            empty_tbl.add_header(["TEP Address", "Transpor:Tnl", "Egr Label", "Oper", "Mcast", "Num"])
+            empty_tbl.add_header(["", "", "", "State", "", "MACs"])
+            for line in empty_tbl.print_table():
+                output.print_line(line)
+        output.print_line("\nTry SR Linux command: show network-instance * protocols bgp-evpn")
 
     def print_vxlan(
         self,
@@ -138,7 +147,16 @@ class EvpnDestinationReport(object):
 
         self._populate_data_vxlan(data)
         self._set_formatters(data, arguments, mode="vxlan")
-        output.print_data(data)
+        if len(list(data.network.items())) > 0:
+            output.print_data(data)
+        else:
+            empty_tbl = SROSTable("Egress VTEP, VNI (Instance 1)", "Number of Egress VTEP, VNI : ", 79, [])
+            empty_tbl.set_column_widths([52, 11, 6, 6, 4])
+            empty_tbl.add_header(["VTEP Address", "Egress VNI", "Oper", "Mcast", "Num"])
+            empty_tbl.add_header(["", "", "State", "", "MACs"])
+            for line in empty_tbl.print_table():
+                output.print_line(line)
+        output.print_line("\nTry SR Linux command: show network-instance * vxlan-interface")
 
     def _fetch_state(self, state, arguments):
         chassis_type_path = build_path("/platform/chassis/type")
@@ -399,7 +417,7 @@ class EvpnDestinationReport(object):
                             destination.tep
                             for destination in es_destination.destination.items()
                         ],
-                        max(updates) if updates else datetime.now(),
+                        max(updates).strftime("%Y-%m-%d %H:%M:%S") if updates else "N/A",
                     )
                 )
 
@@ -477,7 +495,7 @@ class EvpnDestinationReport(object):
                         for mac_type in es.statistics.get().mac_type.items()
                     ),
                     ", ".join([vtep.address for vtep in es.vtep.items()]),
-                    max(updates) if updates else datetime.now(),
+                    max(updates).strftime("%Y-%m-%d %H:%M:%S") if updates else "N/A",
                 )
             )
 

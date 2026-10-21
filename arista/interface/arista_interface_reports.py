@@ -368,8 +368,6 @@ class AristaInterfaceReports:
                     mem_items = []
                     if hasattr(lag_obj, 'member'):
                         mem_items = lag_obj.member.items()
-                    elif hasattr(lag_obj, 'member_interface'):
-                        mem_items = lag_obj.member_interface.items()
                     for m in mem_items:
                         m_name = format_arista_intf(m.name, short=True)
                         m_oper = getattr(m, 'oper_state', 'down')

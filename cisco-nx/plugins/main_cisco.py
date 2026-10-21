@@ -11,6 +11,9 @@ from srlinux.location import build_path
 import sys
 import os
 
+import srlinux.mgmt.cli.plugins.reports as _srl_reports
+
+_reports_dir = os.path.dirname(os.path.abspath(_srl_reports.__file__))
 potential_paths = [
     '/etc/opt/srlinux/cli',
     os.path.expanduser('~/cli'),
@@ -18,28 +21,27 @@ potential_paths = [
     '/home/auser/cli',
     '/home/admin/cli',
     '/home/srlinux/cli',
+    _reports_dir,
 ]
 if globals().get('__file__'):
     cand = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     potential_paths.insert(0, cand)
 
-import_base = None
+if _reports_dir not in sys.path:
+    sys.path.insert(0, _reports_dir)
+
 for path in potential_paths:
     if os.path.exists(path) and (
-        os.path.exists(os.path.join(path, 'system')) or
-        os.path.exists(os.path.join(path, 'interface')) or
-        os.path.exists(os.path.join(path, 'ip'))
+        os.path.exists(os.path.join(path, 'system', 'cisco_system_reports.py')) or
+        os.path.exists(os.path.join(path, 'cisco_system_reports.py'))
     ):
-        import_base = path
+        if path not in sys.path:
+            sys.path.insert(0, path)
+        for subdir in ["ip", "mac", "interface", "system", "routing"]:
+            sub_path = os.path.join(path, subdir)
+            if os.path.exists(sub_path) and sub_path not in sys.path:
+                sys.path.insert(0, sub_path)
         break
-
-if import_base is None:
-    raise ImportError("Could not find a valid CLI plugin base directory")
-
-for subdir in ["ip", "mac", "interface", "system", "routing"]:
-    sub_path = os.path.join(import_base, subdir)
-    if os.path.exists(sub_path) and sub_path not in sys.path:
-        sys.path.insert(0, sub_path)
 
 from cisco_system_reports import CiscoSystemReports
 from cisco_interface_reports import CiscoInterfaceReports
@@ -62,24 +64,57 @@ def _enter_submode(state, arguments):
         state.location = arguments
 
 def should_register_show_mode(persona_name):
+    aliases = {
+        'arista': ('arista', 'eos', 'all'),
+        'cisco': ('cisco', 'cisco-nx', 'ciscx', 'nxos', 'all'),
+        'juniper': ('juniper', 'junos', 'all'),
+        'nokia': ('nokia', 'sros', 'sr-os', 'all'),
+    }
+    valid_prefs = aliases.get(persona_name, (persona_name, persona_name.replace('-', ''), 'all'))
+    target_plugin = f'main_{persona_name.split("-")[0]}.py'
+
+    user_cli = os.path.expanduser('~/cli')
+    if os.path.abspath(user_cli) != '/etc/opt/srlinux/cli':
+        user_cfg = os.path.join(user_cli, 'default_persona')
+        if os.path.exists(user_cfg):
+            try:
+                with open(user_cfg) as f:
+                    pref = f.read().strip().lower()
+                    if pref:
+                        if pref == 'none':
+                            return False
+                        return pref in valid_prefs
+            except Exception:
+                pass
+        user_plugins_dir = os.path.join(user_cli, 'plugins')
+        if os.path.exists(user_plugins_dir):
+            try:
+                user_plugins = [f for f in os.listdir(user_plugins_dir) if f.startswith('main_') and f.endswith('.py')]
+                if user_plugins:
+                    return len(user_plugins) == 1 and target_plugin in user_plugins
+            except Exception:
+                pass
+
     config_file = '/etc/opt/srlinux/cli/default_persona'
     if os.path.exists(config_file):
         try:
             with open(config_file) as f:
                 pref = f.read().strip().lower()
-                if pref == 'none':
-                    return False
-                if pref in [persona_name, persona_name.replace('-', ''), 'all']:
-                    return True
-                return False
+                if pref:
+                    if pref == 'none':
+                        return False
+                    return pref in valid_prefs
         except Exception:
             pass
     # If no default_persona file is set, check if multiple vendor plugins are present
     plugins_dir = '/etc/opt/srlinux/cli/plugins'
     if os.path.exists(plugins_dir):
-        installed_plugins = [f for f in os.listdir(plugins_dir) if f.startswith('main_') and f.endswith('.py')]
-        if len(installed_plugins) == 1 and f'main_{persona_name.split("-")[0]}.py' in installed_plugins[0]:
-            return True
+        try:
+            installed_plugins = [f for f in os.listdir(plugins_dir) if f.startswith('main_') and f.endswith('.py')]
+            if len(installed_plugins) == 1 and target_plugin in installed_plugins:
+                return True
+        except Exception:
+            pass
     return False
 
 class Plugin(CliPlugin):
@@ -234,10 +269,16 @@ class Plugin(CliPlugin):
         self._cli = cli
         # 1. Root global command 'nxos' for interactive submode and one-liners:
         # e.g., 'nxos show version' or entering 'nxos' mode
-        nxos_node = cli.add_global_command(
-            Syntax('nxos', help='Cisco NX-OS operational mode and commands'),
-            update_location=_enter_submode
-        )
+        try:
+            if hasattr(cli, 'running_mode') and cli.running_mode.has_global_command('nxos'):
+                nxos_node = cli.get_global_command('nxos')
+            else:
+                nxos_node = cli.add_global_command(
+                    Syntax('nxos', help='Cisco NX-OS operational mode and commands'),
+                    update_location=_enter_submode
+                )
+        except Exception:
+            nxos_node = cli.get_global_command('nxos')
         nx_show = self._add_or_override(
             nxos_node,
             Syntax('show', help='Cisco NX-OS show reports'),
@@ -246,7 +287,25 @@ class Plugin(CliPlugin):
         self._register_all_commands(nx_show)
 
     def on_start(self, state):
+        if os.getuid() != 0:
+            try:
+                aaa_client = getattr(state, '_aaa_client', None)
+                if aaa_client and not getattr(aaa_client, '_last_authentication_method', None):
+                    aaa_client._last_authentication_method = 'local'
+                    if getattr(aaa_client, '_session', None):
+                        aaa_client._session.close()
+                    new_sess = aaa_client._open_session()
+                    if new_sess:
+                        aaa_client._session = new_sess
+            except Exception:
+                pass
         if not should_register_show_mode('cisco'):
+            if os.getuid() != 0:
+                try:
+                    from srlinux.mgmt.cli.lazy_loader_utils import wait_for_user_plugins_load
+                    wait_for_user_plugins_load(state)
+                except Exception:
+                    pass
             return
         # 2. Register to show_mode for persona compatibility (e.g. cnxuser)
         wait_for_show_reports_load(state)
@@ -308,12 +367,12 @@ class Plugin(CliPlugin):
         if not state.is_last_command:
             return
         IpRouteReport()._show_routes(state, output, network_instance='default')
-        output.print_line('\nTry SR Linux command: show network-instance default ipv4 route')
+        output.print_line('\nTry SR Linux command: show network-instance default route-table ipv4-unicast summary')
 
     def _print_ip_route_vrf(self, state, arguments, output, **_kwargs):
         vrf_name = arguments.get('vrf_name') or 'default'
         IpRouteReport()._show_routes(state, output, network_instance=vrf_name)
-        output.print_line(f'\nTry SR Linux command: show network-instance {vrf_name} ipv4 route')
+        output.print_line(f'\nTry SR Linux command: show network-instance {vrf_name} route-table ipv4-unicast summary')
 
     def _print_ip_interface_brief(self, state, output, **_kwargs):
         IpInterfaceReport().show_ip_interface_brief(state, output, vrf='default')

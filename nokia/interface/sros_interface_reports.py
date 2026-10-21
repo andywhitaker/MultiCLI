@@ -9,6 +9,15 @@ import re
 from srlinux.location import build_path
 from srlinux.schema.data_store import DataStore
 
+
+def _safe_get(obj, attr, default=None):
+    try:
+        val = getattr(obj, attr, default)
+        return default if val is None else val
+    except Exception:
+        return default
+
+
 def format_sros_port(name):
     if not name:
         return ""
@@ -52,13 +61,25 @@ class SrosInterfaceReports:
             if port_id and port_id != '*' and port_id not in (raw_name, sros_name):
                 continue
 
-            admin_state = "Up" if getattr(intf, 'admin_state', '') == 'enable' else "Down"
-            oper_state = "Up" if getattr(intf, 'oper_state', '') == 'up' else "Down"
+            admin_state = "Up" if _safe_get(intf, 'admin_state', '') == 'enable' else "Down"
+            oper_state = "Up" if _safe_get(intf, 'oper_state', '') == 'up' else "Down"
             link = "Yes" if oper_state == "Up" else "No"
-            mtu = str(getattr(intf, 'mtu', 9232) or 9232)
+            mtu = str(_safe_get(intf, 'mtu', 9232) or 9232)
+            lag_str = "-"
+            eth_c = _safe_get(intf, 'ethernet')
+            if eth_c is not None and eth_c.exists():
+                agg_id = _safe_get(eth_c.get(), 'aggregate_id', None)
+                if agg_id:
+                    lag_str = str(agg_id).replace('lag', '')
+            encap = "dot1q" if _safe_get(intf, 'vlan_tagging', False) else "null"
+            xcvr_str = ""
+            xcvr_c = _safe_get(intf, 'transceiver')
+            if xcvr_c is not None and xcvr_c.exists():
+                xcvr_obj = xcvr_c.get()
+                xcvr_str = str(_safe_get(xcvr_obj, 'form_factor', '') or _safe_get(xcvr_obj, 'ethernet_pmd', '') or '')
 
             output.print_line(
-                f"{sros_name:<12}{admin_state:<7}{link:<6}{oper_state:<8}{mtu:<7}{mtu:<7}{'-':<7}{'netw':<6}{'null':<6}{'xcvr':<6}{''}"
+                f"{sros_name:<12}{admin_state:<7}{link:<6}{oper_state:<8}{mtu:<7}{mtu:<7}{lag_str:<7}{'netw':<6}{encap:<6}{'xcvr':<6}{xcvr_str}"
             )
             count += 1
 
@@ -85,7 +106,7 @@ class SrosInterfaceReports:
             if not raw_name.startswith('ethernet-'):
                 continue
             sros_name = format_sros_port(raw_name)
-            desc = getattr(intf, 'description', '') or ''
+            desc = _safe_get(intf, 'description', '') or ''
             output.print_line(f"{sros_name:<20}{desc}")
 
         output.print_line("=" * 79)
@@ -99,6 +120,9 @@ class SrosInterfaceReports:
             intf_data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for intf in intf_data.interface.items():
                 if str(intf.name).startswith('lag'):
+                    lid = str(intf.name).replace('lag', '')
+                    if lag_id and lag_id != '*' and str(lag_id) not in (str(intf.name), lid):
+                        continue
                     lags.append(intf)
         except Exception:
             pass
@@ -114,16 +138,18 @@ class SrosInterfaceReports:
         else:
             for l in lags:
                 lid = str(l.name).replace('lag', '') or '1'
-                adm = "up" if getattr(l, 'admin_state', '') == 'enable' else "down"
-                opr = "up" if getattr(l, 'oper_state', '') == 'up' else "down"
+                adm = "up" if _safe_get(l, 'admin_state', '') == 'enable' else "down"
+                opr = "up" if _safe_get(l, 'oper_state', '') == 'up' else "down"
                 threshold = "0"
                 up_count = 0
-                if hasattr(l, 'lag') and l.lag.exists():
-                    lag_obj = l.lag.get()
-                    threshold = str(getattr(lag_obj, 'min_links', 0))
-                    if hasattr(lag_obj, 'member'):
-                        for mem in lag_obj.member.items():
-                            if getattr(mem, 'oper_state', '') == 'up':
+                lag_c = _safe_get(l, 'lag')
+                if lag_c is not None and lag_c.exists():
+                    lag_obj = lag_c.get()
+                    threshold = str(_safe_get(lag_obj, 'min_links', 0))
+                    mem_list = _safe_get(lag_obj, 'member')
+                    if mem_list is not None and hasattr(mem_list, 'items'):
+                        for mem in mem_list.items():
+                            if _safe_get(mem, 'oper_state', '') == 'up':
                                 up_count += 1
                 output.print_line(f"{lid:<10}{adm:<8}{opr:<8}{'No':<10}{threshold:<11}{str(up_count):<9}{'N/A'}")
 
@@ -141,11 +167,13 @@ class SrosInterfaceReports:
         try:
             lldp_data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             lldp = lldp_data.system.get().lldp.get()
-            if hasattr(lldp, 'interface'):
-                for intf in lldp.interface.items():
+            intf_list = _safe_get(lldp, 'interface')
+            if intf_list is not None and hasattr(intf_list, 'items'):
+                for intf in intf_list.items():
                     local_intf = str(intf.name)
-                    if hasattr(intf, 'neighbor'):
-                        for n in intf.neighbor.items():
+                    neigh_list = _safe_get(intf, 'neighbor')
+                    if neigh_list is not None and hasattr(neigh_list, 'items'):
+                        for n in neigh_list.items():
                             neighbors.append((local_intf, n))
         except Exception:
             pass
@@ -155,10 +183,10 @@ class SrosInterfaceReports:
         else:
             for local_intf, n in neighbors:
                 sros_port = format_sros_port(local_intf)
-                chassis_id = getattr(n, 'chassis_id', 'N/A')
-                port_id = getattr(n, 'port_id', 'N/A')
-                sys_name = getattr(n, 'system_name', 'N/A')
-                sys_desc = getattr(n, 'system_description', 'N/A')
+                chassis_id = _safe_get(n, 'chassis_id', 'N/A')
+                port_id = _safe_get(n, 'port_id', 'N/A')
+                sys_name = _safe_get(n, 'system_name', 'N/A')
+                sys_desc = _safe_get(n, 'system_description', 'N/A')
                 output.print_line(f"Port Id         : {sros_port} ({local_intf})")
                 output.print_line(f"Chassis Id      : {chassis_id}")
                 output.print_line(f"Port Id         : {port_id}")

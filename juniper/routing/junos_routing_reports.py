@@ -10,6 +10,15 @@ import re
 from srlinux.location import build_path
 from srlinux.schema.data_store import DataStore
 
+
+def _safe_get(obj, attr, default=None):
+    try:
+        val = getattr(obj, attr, default)
+        return default if val is None else val
+    except Exception:
+        return default
+
+
 def format_junos_intf(name, with_unit=True):
     """Format SR Linux interface name to Juniper JUNOS format."""
     if not name:
@@ -70,11 +79,11 @@ class JunosRoutingReports:
                 if hasattr(intf, 'subinterface'):
                     for sub in intf.subinterface.items():
                         if hasattr(sub, 'ipv4') and sub.ipv4.exists():
-                            arp = getattr(sub.ipv4.get(), 'arp', None)
+                            arp = _safe_get(sub.ipv4.get(), 'arp', None)
                             if arp and hasattr(arp.get(), 'neighbor'):
                                 for n in arp.get().neighbor.items():
                                     ip = n.ipv4_address
-                                    mac = format_mac_junos(getattr(n, 'link_layer_address', ''))
+                                    mac = format_mac_junos(_safe_get(n, 'link_layer_address', ''))
                                     full_intf = f"{intf.name}.{sub.index}"
                                     j_intf = format_junos_intf(full_intf, with_unit=True)
                                     entries.append((mac, ip, j_intf))
@@ -89,8 +98,8 @@ class JunosRoutingReports:
                     if hasattr(ni, 'neighbor'):
                         for n in ni.neighbor.items():
                             ip = n.ipv4_address
-                            mac = format_mac_junos(getattr(n, 'link_layer_address', ''))
-                            intf = format_junos_intf(getattr(n, 'interface', ''), with_unit=True)
+                            mac = format_mac_junos(_safe_get(n, 'link_layer_address', ''))
+                            intf = format_junos_intf(_safe_get(n, 'interface', ''), with_unit=True)
                             entries.append((mac, ip, intf))
             except Exception:
                 pass
@@ -113,12 +122,12 @@ class JunosRoutingReports:
         try:
             data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for iface in data.get_descendants('/system/lldp/interface'):
-                local_name = format_junos_intf(getattr(iface, 'name', ''), with_unit=False)
+                local_name = format_junos_intf(_safe_get(iface, 'name', ''), with_unit=False)
                 if hasattr(iface, 'neighbor'):
                     for neigh in iface.neighbor.items():
-                        sys_name = getattr(neigh, 'system_name', '') or '-'
-                        port_id = format_junos_intf(getattr(neigh, 'port_id', ''), with_unit=False)
-                        chassis_id = getattr(neigh, 'chassis_id', '') or '-'
+                        sys_name = _safe_get(neigh, 'system_name', '') or '-'
+                        port_id = format_junos_intf(_safe_get(neigh, 'port_id', ''), with_unit=False)
+                        chassis_id = _safe_get(neigh, 'chassis_id', '') or '-'
                         lines.append(f"{local_name:<18} {'-':<17} {chassis_id:<20} {port_id:<18} {sys_name}")
         except Exception:
             pass
@@ -130,8 +139,8 @@ class JunosRoutingReports:
     def _get_vlan_for_ni(self, state, raw_intfs):
         """Extract VLAN ID for a mac-vrf network instance:
         1. Check member subinterfaces' single-tagged VLAN encapsulation.
-        2. Fall back to IRB subinterface index (e.g. irb0.1 -> 1).
-        3. Fall back to subinterface index if > 0.
+        2. Fall back to IRB subinterface index if > 0 (or 1 if 0).
+        3. Fall back to subinterface index if > 0 (or 1 if member exists).
         4. Fall back to '--'.
         """
         # 1. Single-tagged encapsulation from member subinterfaces
@@ -141,7 +150,7 @@ class JunosRoutingReports:
                 try:
                     p = build_path(f'/interface[name={p_name}]/subinterface[index={sub_idx}]/vlan/encap/single-tagged/vlan-id')
                     d = state.server.get_data_store(DataStore.State).get_data(p, recursive=False)
-                    vlan_val = getattr(d.interface.get().subinterface.get().vlan.get().encap.get().single_tagged.get(), 'vlan_id', None)
+                    vlan_val = _safe_get(d.interface.get().subinterface.get().vlan.get().encap.get().single_tagged.get(), 'vlan_id', None)
                     if vlan_val is not None:
                         return str(vlan_val)
                 except Exception:
@@ -152,7 +161,7 @@ class JunosRoutingReports:
             if 'irb' in intf_name:
                 m = re.search(r'irb\d*\.(\d+)', intf_name)
                 if m:
-                    return m.group(1)
+                    return m.group(1) if m.group(1) != '0' else '1'
 
         # 3. Fall back to subinterface index if > 0
         for intf_name in raw_intfs:
@@ -161,6 +170,8 @@ class JunosRoutingReports:
                 if sub_idx != '0':
                     return sub_idx
 
+        if raw_intfs:
+            return '1'
         return "--"
 
     def show_vlans(self, state, output):
@@ -184,7 +195,7 @@ class JunosRoutingReports:
         try:
             data = state.server.get_data_store(DataStore.State).get_data(path, recursive=False)
             for ni in sorted(data.network_instance.items(), key=lambda x: str(x.name)):
-                ni_type = getattr(ni, 'type', '')
+                ni_type = _safe_get(ni, 'type', '')
                 if ni_type != 'mac-vrf':
                     continue
                 name = ni.name
@@ -217,17 +228,17 @@ class JunosRoutingReports:
                 lines.append("    LACP state:       Role   Exp   Def  Dist  Col  Syn  Aggr  Timeout  Activity")
 
                 members = []
-                if hasattr(intf, 'lag') and intf.lag.exists():
-                    lag_node = intf.lag.get()
+                lag_c = _safe_get(intf, 'lag')
+                if lag_c is not None and lag_c.exists():
+                    lag_node = lag_c.get()
                     mem_items = []
-                    if hasattr(lag_node, 'member'):
-                        mem_items = lag_node.member.items()
-                    elif hasattr(lag_node, 'member_interface'):
-                        mem_items = lag_node.member_interface.items()
+                    mem_list = _safe_get(lag_node, 'member') or _safe_get(lag_node, 'member_interface')
+                    if mem_list is not None and hasattr(mem_list, 'items'):
+                        mem_items = mem_list.items()
 
                     for mem in mem_items:
                         m_name = format_junos_intf(mem.name, with_unit=False)
-                        oper = getattr(mem, 'oper_state', '-')
+                        oper = _safe_get(mem, 'oper_state', '-')
                         role = "Actor"
                         exp = "No"
                         df = "No"
@@ -241,23 +252,29 @@ class JunosRoutingReports:
                         tx_state = "Fast periodic" if oper == "up" else "No periodic"
                         mux_state = "Collecting distributing" if oper == "up" else "Detached"
 
-                        lacp_obj = getattr(mem, 'lacp', None)
-                        if lacp_obj:
+                        lacp_obj = _safe_get(mem, 'lacp', None)
+                        if lacp_obj is not None:
                             l_node = lacp_obj.get() if hasattr(lacp_obj, 'get') else lacp_obj
-                            if hasattr(l_node, 'distributing'):
-                                dist = "Yes" if getattr(l_node, 'distributing') else "No"
-                            if hasattr(l_node, 'collecting'):
-                                col = "Yes" if getattr(l_node, 'collecting') else "No"
-                            if hasattr(l_node, 'synchronization'):
-                                syn_val = str(getattr(l_node, 'synchronization', '')).lower()
+                            dist_v = _safe_get(l_node, 'distributing')
+                            if dist_v is not None:
+                                dist = "Yes" if dist_v else "No"
+                            col_v = _safe_get(l_node, 'collecting')
+                            if col_v is not None:
+                                col = "Yes" if col_v else "No"
+                            syn_v = _safe_get(l_node, 'synchronization')
+                            if syn_v is not None:
+                                syn_val = str(syn_v).lower()
                                 syn = "Yes" if "in-sync" in syn_val or "true" in syn_val else "No"
-                            if hasattr(l_node, 'aggregatable'):
-                                aggr = "Yes" if getattr(l_node, 'aggregatable') else "No"
-                            if hasattr(l_node, 'timeout'):
-                                t_val = str(getattr(l_node, 'timeout', '')).lower()
+                            aggr_v = _safe_get(l_node, 'aggregatable')
+                            if aggr_v is not None:
+                                aggr = "Yes" if aggr_v else "No"
+                            t_v = _safe_get(l_node, 'timeout')
+                            if t_v is not None:
+                                t_val = str(t_v).lower()
                                 timeout = "Fast" if "short" in t_val or "fast" in t_val else "Slow"
-                            if hasattr(l_node, 'activity'):
-                                act_val = str(getattr(l_node, 'activity', '')).capitalize()
+                            act_v = _safe_get(l_node, 'activity')
+                            if act_v is not None:
+                                act_val = str(act_v).capitalize()
                                 if act_val:
                                     activity = act_val
 
@@ -295,17 +312,17 @@ class JunosRoutingReports:
         nh_map = {}
         try:
             for nh in routes_data.get_descendants('/network-instance/route-table/next-hop'):
-                nh_idx = getattr(nh, 'index', None)
+                nh_idx = _safe_get(nh, 'index', None)
                 if nh_idx is None:
                     continue
-                nh_type = getattr(nh, 'type', None)
-                ip = getattr(nh, 'ip_address', None)
-                subif = getattr(nh, 'subinterface', None)
+                nh_type = _safe_get(nh, 'type', None)
+                ip = _safe_get(nh, 'ip_address', None)
+                subif = _safe_get(nh, 'subinterface', None)
                 resolving_nhg = None
                 if nh_type == 'tunnel' and hasattr(nh, 'tunnel'):
                     try:
                         t = nh.tunnel.get()
-                        pfx = getattr(t, 'ip_prefix', None)
+                        pfx = _safe_get(t, 'ip_prefix', None)
                         if pfx and not ip:
                             ip = str(pfx).split('/')[0]
                     except Exception:
@@ -313,9 +330,9 @@ class JunosRoutingReports:
                 if nh_type == 'indirect' and hasattr(nh, 'indirect'):
                     try:
                         ind = nh.indirect.get()
-                        rr = getattr(ind, 'resolving_route', None)
+                        rr = _safe_get(ind, 'resolving_route', None)
                         if rr:
-                            resolving_nhg = getattr(rr.get(), 'next_hop_group', None)
+                            resolving_nhg = _safe_get(rr.get(), 'next_hop_group', None)
                     except Exception:
                         pass
                 nh_map[str(nh_idx)] = {
@@ -329,11 +346,11 @@ class JunosRoutingReports:
         nhg_map = {}
         try:
             for nhg in routes_data.get_descendants('/network-instance/route-table/next-hop-group'):
-                nhg_idx = getattr(nhg, 'index', None)
+                nhg_idx = _safe_get(nhg, 'index', None)
                 if nhg_idx is not None and hasattr(nhg, 'next_hop'):
                     hops = []
                     for nh_item in nhg.next_hop.items():
-                        target_nh = getattr(nh_item, 'next_hop', None)
+                        target_nh = _safe_get(nh_item, 'next_hop', None)
                         if target_nh is not None and str(target_nh) in nh_map:
                             hops.append(nh_map[str(target_nh)])
                     nhg_map[str(nhg_idx)] = hops
@@ -351,13 +368,13 @@ class JunosRoutingReports:
         all_routes = []
         try:
             for r in routes_data.get_descendants('/network-instance/route-table/ipv4-unicast/route'):
-                pfx = getattr(r, 'ipv4_prefix', None)
+                pfx = _safe_get(r, 'ipv4_prefix', None)
                 if not pfx:
                     continue
-                rtype = str(getattr(r, 'route_type', '')).lower()
-                rowner = str(getattr(r, 'route_owner', '')).lower()
-                pref = getattr(r, 'preference', None)
-                nhg_id = getattr(r, 'next_hop_group', None)
+                rtype = str(_safe_get(r, 'route_type', '')).lower()
+                rowner = str(_safe_get(r, 'route_owner', '')).lower()
+                pref = _safe_get(r, 'preference', None)
+                nhg_id = _safe_get(r, 'next_hop_group', None)
                 hops = nhg_map.get(str(nhg_id), []) if nhg_id is not None else []
 
                 # Format protocol and preference
@@ -387,9 +404,10 @@ class JunosRoutingReports:
 
                 # Calculate uptime
                 uptime_str = ""
-                if hasattr(r, 'last_app_update') and r.last_app_update:
+                last_up = _safe_get(r, 'last_app_update', None)
+                if last_up:
                     try:
-                        ts_str = str(r.last_app_update).split(' (')[0].strip()
+                        ts_str = str(last_up).split(' (')[0].strip()
                         if 'Z' in ts_str:
                             ts_str = ts_str.replace('Z', '+00:00')
                         dt = datetime.datetime.fromisoformat(ts_str)
@@ -460,7 +478,7 @@ class JunosRoutingReports:
 
         output.print_line("\n".join(lines).rstrip())
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line(f"Try SR Linux command: show network-instance {network_instance} ipv4 route")
+        output.print_line(f"Try SR Linux command: show network-instance {network_instance} route-table ipv4-unicast summary")
 
     def show_route_summary(self, state, output):
         """Display Juniper JUNOS style 'show route summary'."""
@@ -472,8 +490,8 @@ class JunosRoutingReports:
             path_bgp = build_path('/network-instance[name=default]/protocols/bgp')
             bgp_data = state.server.get_data_store(DataStore.State).get_data(path_bgp, recursive=True)
             bgp = bgp_data.network_instance.get().protocols.get().bgp.get()
-            asn = getattr(bgp, 'autonomous_system', '--')
-            router_id = getattr(bgp, 'router_id', '--')
+            asn = _safe_get(bgp, 'autonomous_system', '--')
+            router_id = _safe_get(bgp, 'router_id', '--')
         except Exception:
             pass
 
@@ -489,8 +507,8 @@ class JunosRoutingReports:
             path_rt = build_path('/network-instance[name=default]/route-table/ipv4-unicast/route[ipv4-prefix=*]')
             rt_data = state.server.get_data_store(DataStore.State).get_data(path_rt, recursive=True)
             for r in rt_data.network_instance.get().route_table.get().ipv4_unicast.get().route.items():
-                rtype = str(getattr(r, 'route_type', '')).lower()
-                rowner = str(getattr(r, 'route_owner', '')).lower()
+                rtype = str(_safe_get(r, 'route_type', '')).lower()
+                rowner = str(_safe_get(r, 'route_owner', '')).lower()
                 if 'connected' in rowner or (rtype == 'local' and 'host' not in rtype):
                     direct_count += 1
                 elif 'host' in rtype or 'local' in rowner:
@@ -523,7 +541,7 @@ class JunosRoutingReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show network-instance default ipv4 route summary")
+        output.print_line("Try SR Linux command: show network-instance default route-table summary")
 
     def show_bgp_summary(self, state, output):
         """Display Juniper JUNOS style 'show bgp summary'."""
@@ -534,38 +552,38 @@ class JunosRoutingReports:
         try:
             data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for n in data.get_descendants('/network-instance/protocols/bgp/neighbor'):
-                peer_ip = getattr(n, 'peer_address', '-')
-                peer_as = getattr(n, 'peer_as', '--')
-                oper = getattr(n, 'session_state', '--')
+                peer_ip = _safe_get(n, 'peer_address', '-')
+                peer_as = _safe_get(n, 'peer_as', '--')
+                oper = _safe_get(n, 'session_state', '--')
                 state_str = str(oper).capitalize() if oper else '--'
-                pg = getattr(n, 'peer_group', None)
+                pg = _safe_get(n, 'peer_group', None)
                 if pg:
                     peer_groups.add(str(pg))
 
                 in_pkts = "--"
-                recv = getattr(n, 'received_messages', None)
+                recv = _safe_get(n, 'received_messages', None)
                 if recv:
                     node = recv.get() if hasattr(recv, 'get') else recv
-                    val = getattr(node, 'total_messages', None)
+                    val = _safe_get(node, 'total_messages', None)
                     if val is not None:
                         in_pkts = str(val)
 
                 out_pkts = "--"
                 out_q = "0"
-                sent = getattr(n, 'sent_messages', None)
+                sent = _safe_get(n, 'sent_messages', None)
                 if sent:
                     node = sent.get() if hasattr(sent, 'get') else sent
-                    val = getattr(node, 'total_messages', None)
+                    val = _safe_get(node, 'total_messages', None)
                     if val is not None:
                         out_pkts = str(val)
-                    qd = getattr(node, 'queue_depth', None)
+                    qd = _safe_get(node, 'queue_depth', None)
                     if qd is not None:
                         out_q = str(qd)
 
-                uptime = getattr(n, 'last_established', '--')
+                uptime = _safe_get(n, 'last_established', '--')
                 if '(' in str(uptime):
                     uptime = str(uptime).split('(')[-1].rstrip(')')
-                flaps = getattr(n, 'established_transitions', '0')
+                flaps = _safe_get(n, 'established_transitions', '0')
                 peers.append({
                     'peer_ip': peer_ip,
                     'peer_as': peer_as,
@@ -584,7 +602,7 @@ class JunosRoutingReports:
             pg_path = build_path('/network-instance[name=*]/protocols/bgp/peer-group[peer-group-name=*]')
             pg_data = state.server.get_data_store(DataStore.State).get_data(pg_path, recursive=False)
             for g in pg_data.get_descendants('/network-instance/protocols/bgp/peer-group'):
-                gname = getattr(g, 'peer_group_name', None)
+                gname = _safe_get(g, 'peer_group_name', None)
                 if gname:
                     peer_groups.add(str(gname))
         except Exception:
@@ -636,7 +654,7 @@ class JunosRoutingReports:
             data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for ni in data.network_instance.items():
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
-                    ospf = getattr(ni.protocols.get(), 'ospf', None)
+                    ospf = _safe_get(ni.protocols.get(), 'ospf', None)
                     if ospf and hasattr(ospf.get(), 'instance'):
                         for inst in ospf.get().instance.items():
                             if hasattr(inst, 'area'):
@@ -646,12 +664,12 @@ class JunosRoutingReports:
                                             intf_name = format_junos_intf(intf.interface_name, with_unit=True)
                                             if hasattr(intf, 'neighbor'):
                                                 for n in intf.neighbor.items():
-                                                    r_id = getattr(n, 'router_id', '--')
-                                                    adj_st = getattr(n, 'adjacency_state', None)
+                                                    r_id = _safe_get(n, 'router_id', '--')
+                                                    adj_st = _safe_get(n, 'adjacency_state', None)
                                                     n_state = str(adj_st).split(':')[-1].capitalize() if adj_st else '--'
-                                                    ip = getattr(n, 'address', '--')
-                                                    pri = getattr(n, 'priority', '--')
-                                                    dead = getattr(n, 'dead_time', '--')
+                                                    ip = _safe_get(n, 'address', '--')
+                                                    pri = _safe_get(n, 'priority', '--')
+                                                    dead = _safe_get(n, 'dead_time', '--')
                                                     lines.append(f"{str(ip):<16} {intf_name:<23} {n_state:<9} {str(r_id):<16} {str(pri):<4} {str(dead)}")
         except Exception:
             pass
@@ -670,20 +688,21 @@ class JunosRoutingReports:
             data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
             for ni in data.network_instance.items():
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
-                    isis = getattr(ni.protocols.get(), 'isis', None)
+                    isis = _safe_get(ni.protocols.get(), 'isis', None)
                     if isis and hasattr(isis.get(), 'instance'):
                         for inst in isis.get().instance.items():
                             if hasattr(inst, 'interface'):
                                 for iface in inst.interface.items():
                                     intf = format_junos_intf(iface.interface_name, with_unit=True)
-                                    if hasattr(iface, 'adjacency'):
-                                        for adj in iface.adjacency.items():
-                                            sys_id = getattr(adj, 'neighbor_hostname', None) or getattr(adj, 'neighbor_system_id', '-')
-                                            level = str(getattr(adj, 'adjacency_level', '2'))
-                                            raw_st = getattr(adj, 'state', '--')
+                                    adj_list = _safe_get(iface, 'adjacency')
+                                    if adj_list is not None and hasattr(adj_list, 'items'):
+                                        for adj in adj_list.items():
+                                            sys_id = _safe_get(adj, 'neighbor_hostname', None) or _safe_get(adj, 'neighbor_system_id', '-')
+                                            level = str(_safe_get(adj, 'adjacency_level', '2'))
+                                            raw_st = _safe_get(adj, 'state', '--')
                                             oper = str(raw_st).split(':')[-1].capitalize() if raw_st else '--'
-                                            hold = str(getattr(adj, 'remaining_holdtime', '--'))
-                                            snpa_raw = getattr(adj, 'neighbor_snpa', None)
+                                            hold = str(_safe_get(adj, 'remaining_holdtime', '--'))
+                                            snpa_raw = _safe_get(adj, 'neighbor_snpa', None)
                                             snpa = format_mac_junos(snpa_raw) if snpa_raw else '--'
                                             lines.append(f"{intf:<21} {str(sys_id):<14} {level:<2} {oper:<13} {hold:<12} {snpa}")
         except Exception:

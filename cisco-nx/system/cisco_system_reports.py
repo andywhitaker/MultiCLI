@@ -8,6 +8,34 @@ import datetime
 from srlinux.location import build_path
 from srlinux.schema.data_store import DataStore
 
+
+def _safe_get(node, attr, default=None):
+    """Safely read an attribute from an SR Linux Data object without raising DataError."""
+    if node is None:
+        return default
+    try:
+        val = getattr(node, attr)
+        return val if val is not None else default
+    except Exception:
+        return default
+
+
+def _parse_srl_timestamp(val):
+    """Parse an SR Linux YANG date-and-time string into a timezone-aware UTC datetime."""
+    if not val:
+        return None
+    try:
+        s = str(val).split('(')[0].strip()
+        if s.endswith('Z'):
+            s = s[:-1] + '+00:00'
+        dt = datetime.datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
 class CiscoSystemReports:
     """Handles Cisco NX-OS system-level show commands."""
 
@@ -27,12 +55,9 @@ class CiscoSystemReports:
         try:
             data = state.server.get_data_store(DataStore.State).get_data(path_chassis, recursive=True)
             ch = data.platform.get().chassis.get()
-            if hasattr(ch, 'serial_number') and ch.serial_number:
-                serial = str(ch.serial_number)
-            if hasattr(ch, 'type') and ch.type:
-                chassis_type = str(ch.type)
-            if hasattr(ch, 'last_booted') and ch.last_booted:
-                last_booted = str(ch.last_booted)
+            serial = str(_safe_get(ch, 'serial_number', '') or '')
+            chassis_type = str(_safe_get(ch, 'type', '-') or '-')
+            last_booted = str(_safe_get(ch, 'last_booted', '') or '')
         except Exception:
             pass
 
@@ -41,12 +66,12 @@ class CiscoSystemReports:
         try:
             sys_data = state.server.get_data_store(DataStore.State).get_data(sys_info_path, recursive=True)
             info = sys_data.system.get().information.get()
-            if hasattr(info, 'version') and info.version:
-                sw_version = str(info.version)
-            if hasattr(info, 'last_booted') and info.last_booted:
-                last_booted = str(info.last_booted)
-            if hasattr(info, 'up_time_counter') and info.up_time_counter:
-                uptime_seconds = int(info.up_time_counter) // 1_000_000_000
+            ver = _safe_get(info, 'version')
+            if ver:
+                sw_version = str(ver)
+            lb = _safe_get(info, 'last_booted')
+            if lb:
+                last_booted = str(lb)
         except Exception:
             pass
 
@@ -138,7 +163,24 @@ class CiscoSystemReports:
     def show_clock(self, state, output):
         """Display Cisco NX-OS style 'show clock': HH:MM:SS.mmm UTC Day Mon DD YYYY."""
         now = datetime.datetime.now(datetime.timezone.utc)
-        clock_str = now.strftime("%H:%M:%S.%f")[:-3] + " UTC " + now.strftime("%a %b %d %Y")
+        tz_str = "UTC"
+        try:
+            sys_data = state.server.get_data_store(DataStore.State).get_data(build_path('/system/information'), recursive=True)
+            info = sys_data.system.get().information.get()
+            if hasattr(info, 'current_datetime') and info.current_datetime:
+                parsed = _parse_srl_timestamp(info.current_datetime)
+                if parsed:
+                    now = parsed
+        except Exception:
+            pass
+        try:
+            clk_data = state.server.get_data_store(DataStore.State).get_data(build_path('/system/clock'), recursive=True)
+            clk = clk_data.system.get().clock.get()
+            if hasattr(clk, 'timezone') and clk.timezone:
+                tz_str = str(clk.timezone)
+        except Exception:
+            pass
+        clock_str = now.strftime("%H:%M:%S.%f")[:-3] + f" {tz_str} " + now.strftime("%a %b %d %Y")
         output.print_line(clock_str)
         output.print_line("\n----------------------------------------------------------------------------------------------------")
         output.print_line("Try SR Linux command: info from state system clock")
@@ -152,8 +194,8 @@ class CiscoSystemReports:
         try:
             data = state.server.get_data_store(DataStore.State).get_data(path_chassis, recursive=True)
             ch = data.platform.get().chassis.get()
-            ch_type = getattr(ch, 'type', None)
-            serial = getattr(ch, 'serial_number', None)
+            ch_type = _safe_get(ch, 'type', None)
+            serial = _safe_get(ch, 'serial_number', None)
             if ch_type:
                 lines.append(f'NAME: "Chassis",  DESCR: "Nokia {ch_type} Chassis"')
                 lines.append(f'PID: {ch_type:<19},  VID: -   ,  SN: {serial if serial else "-"}\n')
@@ -165,9 +207,9 @@ class CiscoSystemReports:
         try:
             data = state.server.get_data_store(DataStore.State).get_data(path_psu, recursive=True)
             for psu in data.platform.get().power_supply.items():
-                p_id = psu.id
-                p_type = getattr(psu, 'type', None)
-                p_sn = getattr(psu, 'serial_number', None)
+                p_id = _safe_get(psu, 'id', '-')
+                p_type = _safe_get(psu, 'type', None)
+                p_sn = _safe_get(psu, 'serial_number', None)
                 if p_type:
                     lines.append(f'NAME: "Power Supply {p_id}",  DESCR: "Nokia Power Supply"')
                     lines.append(f'PID: {p_type:<19},  VID: -   ,  SN: {p_sn if p_sn else "-"}\n')
@@ -179,9 +221,9 @@ class CiscoSystemReports:
         try:
             data = state.server.get_data_store(DataStore.State).get_data(path_fan, recursive=True)
             for fan in data.platform.get().fan_tray.items():
-                f_id = fan.id
-                f_sn = getattr(fan, 'serial_number', None)
-                f_type = getattr(fan, 'type', 'FAN-MODULE')
+                f_id = _safe_get(fan, 'id', '-')
+                f_sn = _safe_get(fan, 'serial_number', None)
+                f_type = _safe_get(fan, 'type', 'FAN-MODULE')
                 if f_sn:
                     lines.append(f'NAME: "Fan {f_id}",  DESCR: "Chassis Fan Module"')
                     lines.append(f'PID: {f_type:<19},  VID: -   ,  SN: {f_sn}\n')
@@ -205,20 +247,30 @@ class CiscoSystemReports:
             lines.append(f"{'Module':<10} {'Sensor':<22} {'MajorThresh':<12} {'MinorThresh':<12} {'CurTemp':<8} {'Status'}")
             lines.append(f"{'':<10} {'':<22} {'(Celsius)':<12} {'(Celsius)':<12} {'(Celsius)':<8} {''}")
             lines.append("--------------------------------------------------------------------")
-            path_temp = build_path('/platform/control[slot=*]/temperature[sensor-name=*]')
+            path_temp = build_path('/platform/control[slot=*]')
             found_temp = False
             try:
                 data = state.server.get_data_store(DataStore.State).get_data(path_temp, recursive=True)
-                for ctrl in data.platform.control.items():
-                    slot = ctrl.slot
-                    if hasattr(ctrl, 'temperature'):
-                        for s in ctrl.temperature.items():
-                            cur = getattr(s, 'instant', None)
+                for ctrl in data.platform.get().control.items():
+                    slot = _safe_get(ctrl, 'slot', 'A')
+                    temp_c = _safe_get(ctrl, 'temperature', None)
+                    if temp_c is not None:
+                        if hasattr(temp_c, 'items'):
+                            for s in temp_c.items():
+                                cur = _safe_get(s, 'instant', None)
+                                if cur is not None:
+                                    found_temp = True
+                                    status = "Ok" if _safe_get(s, 'alarm_status', False) is False else "Alarm"
+                                    s_name = _safe_get(s, 'sensor_name', 'Control Processor')
+                                    lines.append(f"Slot-{str(slot):<5} {str(s_name):<22} {'--':<12} {'--':<12} {str(cur):<8} {status}")
+                        else:
+                            t_node = temp_c.get() if hasattr(temp_c, 'get') else temp_c
+                            cur = _safe_get(t_node, 'instant', None)
                             if cur is not None:
                                 found_temp = True
-                                status = "Ok" if getattr(s, 'alarm_status', False) is False else "Alarm"
-                                s_name = s.sensor_name
-                                lines.append(f"Slot-{slot:<5} {s_name:<22} {'--':<12} {'--':<12} {cur:<8} {status}")
+                                status = "Ok" if _safe_get(t_node, 'alarm_status', False) is False else "Alarm"
+                                s_name = _safe_get(t_node, 'sensor_name', 'Control Processor')
+                                lines.append(f"Slot-{str(slot):<5} {str(s_name):<22} {'--':<12} {'--':<12} {str(cur):<8} {status}")
             except Exception:
                 pass
             if not found_temp:
@@ -234,15 +286,15 @@ class CiscoSystemReports:
             found_psu = False
             try:
                 data = state.server.get_data_store(DataStore.State).get_data(path_psu, recursive=True)
-                for psu in data.platform.power_supply.items():
-                    p_id = psu.id
-                    p_type = getattr(psu, 'type', '-')
-                    oper = getattr(psu, 'oper_state', '-')
-                    p_cap = getattr(psu, 'capacity', None)
+                for psu in data.platform.get().power_supply.items():
+                    p_id = _safe_get(psu, 'id', '-')
+                    p_type = _safe_get(psu, 'type', '-')
+                    oper = _safe_get(psu, 'oper_state', '-')
+                    p_cap = _safe_get(psu, 'capacity', None)
                     p_cap_str = f"{p_cap}W" if p_cap is not None else "--"
-                    if oper != 'empty' or p_type != '-':
+                    if oper != 'empty' and p_type != '-':
                         found_psu = True
-                        lines.append(f"{p_id:<6} {p_type:<18} {p_cap_str:<12} {oper}")
+                        lines.append(f"{str(p_id):<6} {str(p_type):<18} {p_cap_str:<12} {str(oper)}")
             except Exception:
                 pass
             if not found_psu:
@@ -258,12 +310,12 @@ class CiscoSystemReports:
             found_fan = False
             try:
                 data = state.server.get_data_store(DataStore.State).get_data(path_fan, recursive=True)
-                for fan in data.platform.fan_tray.items():
-                    f_id = fan.id
-                    oper = getattr(fan, 'oper_state', '-')
+                for fan in data.platform.get().fan_tray.items():
+                    f_id = _safe_get(fan, 'id', '-')
+                    oper = _safe_get(fan, 'oper_state', '-')
                     if oper != 'empty':
                         found_fan = True
-                        lines.append(f"Fan{f_id:<7} Chassis Fan          {oper}")
+                        lines.append(f"Fan{str(f_id):<7} Chassis Fan          {str(oper)}")
             except Exception:
                 pass
             if not found_fan:
@@ -313,9 +365,9 @@ class CiscoSystemReports:
         try:
             lc_data = state.server.get_data_store(DataStore.State).get_data(linecard_path, recursive=True)
             for lc in lc_data.platform.get().linecard.items():
-                slot = getattr(lc, 'slot', '1')
-                model = getattr(lc, 'type', '') or getattr(lc, 'part_number', 'Linecard')
-                oper = getattr(lc, 'oper_state', 'up')
+                slot = _safe_get(lc, 'slot', '1')
+                model = _safe_get(lc, 'type', '') or _safe_get(lc, 'part_number', 'Linecard')
+                oper = _safe_get(lc, 'oper_state', 'up')
                 status = "ok" if oper == 'up' else "down"
                 modules.append({
                     'mod': str(slot),
@@ -335,9 +387,9 @@ class CiscoSystemReports:
             try:
                 ctrl_data = state.server.get_data_store(DataStore.State).get_data(ctrl_path, recursive=True)
                 for c in ctrl_data.platform.get().control.items():
-                    slot = getattr(c, 'slot', '1')
-                    model = getattr(c, 'type', '') or getattr(c, 'part_number', 'Control')
-                    oper = getattr(c, 'oper_state', 'up')
+                    slot = _safe_get(c, 'slot', '1')
+                    model = _safe_get(c, 'type', '') or _safe_get(c, 'part_number', 'Control')
+                    oper = _safe_get(c, 'oper_state', 'up')
                     status = "ok" if oper == 'up' else "down"
                     modules.append({
                         'mod': '1',
@@ -375,82 +427,82 @@ class CiscoSystemReports:
         output.print_line("Try SR Linux command: show platform")
 
     def show_processes_cpu(self, state, output):
-        """Display Cisco NX-OS style 'show processes cpu'."""
+        """Display Cisco NX-OS style 'show processes cpu' using SR Linux State datastore."""
         lines = []
-        cpu_5sec = None
-        cpu_1min = None
-        cpu_5min = None
+        cpu_5sec = "0"
+        cpu_1min = "0"
+        cpu_5min = "0"
+        now_dt = datetime.datetime.now(datetime.timezone.utc)
 
-        path_cpu = build_path('/platform/control[slot=*]/cpu[index=all]/total')
         try:
-            cpu_data = state.server.get_data_store(DataStore.State).get_data(path_cpu, recursive=True)
-            for ctrl in cpu_data.platform.get().control.items():
-                if hasattr(ctrl, 'cpu'):
-                    for cpu_obj in ctrl.cpu.items():
-                        if hasattr(cpu_obj, 'total') and cpu_obj.total.exists():
-                            tot = cpu_obj.total.get()
-                            cpu_5sec = getattr(tot, 'instant', None)
-                            cpu_1min = getattr(tot, 'average_1', getattr(tot, 'average-1', None))
-                            cpu_5min = getattr(tot, 'average_5', getattr(tot, 'average-5', None))
-                            break
-                if cpu_5sec is not None:
-                    break
+            sys_data = state.server.get_data_store(DataStore.State).get_data(build_path('/system/information'), recursive=True)
+            info = sys_data.system.get().information.get()
+            curr_dt = _safe_get(info, 'current_datetime')
+            if curr_dt:
+                parsed_now = _parse_srl_timestamp(curr_dt)
+                if parsed_now:
+                    now_dt = parsed_now
         except Exception:
             pass
 
-        if cpu_5sec is None or cpu_1min is None or cpu_5min is None:
-            try:
-                with open('/proc/loadavg') as f:
-                    parts = f.read().split()
-                    load1, load5 = parts[0], parts[1]
-                    cpu_5sec = cpu_5sec if cpu_5sec is not None else load1
-                    cpu_1min = cpu_1min if cpu_1min is not None else load1
-                    cpu_5min = cpu_5min if cpu_5min is not None else load5
-            except Exception:
-                cpu_5sec = cpu_5sec or "0"
-                cpu_1min = cpu_1min or "0"
-                cpu_5min = cpu_5min or "0"
+        ps_rows = []
+        path_ctrl = build_path('/platform/control[slot=*]')
+        try:
+            ctrl_data = state.server.get_data_store(DataStore.State).get_data(path_ctrl, recursive=True)
+            for ctrl in ctrl_data.platform.get().control.items():
+                cpu_list = _safe_get(ctrl, 'cpu')
+                if cpu_list is not None:
+                    for cpu_obj in cpu_list.items():
+                        idx = str(_safe_get(cpu_obj, 'index', ''))
+                        tot_container = _safe_get(cpu_obj, 'total')
+                        if idx == 'all' and tot_container is not None and tot_container.exists():
+                            tot = tot_container.get()
+                            inst = _safe_get(tot, 'instant')
+                            avg1 = _safe_get(tot, 'average_1')
+                            avg5 = _safe_get(tot, 'average_5')
+                            if inst is not None:
+                                cpu_5sec = str(inst)
+                            if avg1 is not None:
+                                cpu_1min = str(avg1)
+                            if avg5 is not None:
+                                cpu_5min = str(avg5)
+                            break
+
+                proc_list = _safe_get(ctrl, 'process')
+                if proc_list is not None:
+                    for p in proc_list.items():
+                        pid = int(_safe_get(p, 'pid', 0) or 0)
+                        comm = str(_safe_get(p, 'name', '') or _safe_get(p, 'args', '') or 'unknown')
+                        cpu_val = float(_safe_get(p, 'cpu_utilization', 0) or 0)
+                        mem_bytes = int(_safe_get(p, 'memory_usage', 0) or 0)
+                        start_dt = _parse_srl_timestamp(_safe_get(p, 'start_time'))
+                        elapsed = max(1.0, (now_dt - start_dt).total_seconds()) if start_dt else 1.0
+                        runtime_ms = int(elapsed * (cpu_val / 100.0) * 1000)
+                        invoked_val = max(1, int(elapsed))
+                        usecs_val = (runtime_ms * 1000) // invoked_val if invoked_val > 0 else 0
+                        ps_rows.append({
+                            'pid': pid,
+                            'ms': runtime_ms,
+                            'invoked': invoked_val,
+                            'usecs': usecs_val,
+                            'cpu': cpu_val,
+                            'mem': mem_bytes,
+                            'comm': comm,
+                        })
+                break
+        except Exception:
+            pass
+
+        ps_rows.sort(key=lambda r: (-r['cpu'], -r['mem'], r['pid']))
 
         lines.append(f"{'PID':<6} {'Runtime(ms)':<13} {'Invoked':<12} {'uSecs':<6} {'1Sec':<6} {'Process'}")
         lines.append(f"-----  ------------  -----------  -----  -----  -----------------")
 
-        ps_rows = []
-        try:
-            import subprocess
-            ps_out = subprocess.run(["ps", "-eo", "pid,time,%cpu,comm", "--sort=-%cpu"],
-                                    stdout=subprocess.PIPE, text=True).stdout
-            for p_line in ps_out.strip().split("\n")[1:30]:
-                fields = p_line.split(None, 3)
-                if len(fields) == 4:
-                    pid, tm, cpu, comm = fields
-                    # Convert time MM:SS or HH:MM:SS to ms approx
-                    t_parts = tm.split(':')
-                    ms = 0
-                    if len(t_parts) == 2:
-                        ms = int(t_parts[0]) * 60000 + int(float(t_parts[1]) * 1000)
-                    elif len(t_parts) == 3:
-                        ms = int(t_parts[0]) * 3600000 + int(t_parts[1]) * 60000 + int(float(t_parts[2]) * 1000)
-                    # Read context switches from /proc/<pid>/status for Invoked
-                    invoked_val = 1
-                    try:
-                        v_ctx = 0
-                        nv_ctx = 0
-                        with open(f'/proc/{pid}/status') as sf:
-                            for s_line in sf:
-                                if s_line.startswith('voluntary_ctxt_switches:'):
-                                    v_ctx = int(s_line.split(':', 1)[1].strip())
-                                elif s_line.startswith('nonvoluntary_ctxt_switches:'):
-                                    nv_ctx = int(s_line.split(':', 1)[1].strip())
-                        tot_ctx = v_ctx + nv_ctx
-                        if tot_ctx > 0:
-                            invoked_val = tot_ctx
-                    except Exception:
-                        pass
-
-                    usecs_val = (ms * 1000) // invoked_val if invoked_val > 0 else 0
-                    lines.append(f"{pid:<6} {str(ms):<13} {str(invoked_val):<12} {str(usecs_val):<6} {f'{cpu}%':<6} {comm}")
-        except Exception:
-            pass
+        for r in ps_rows[:30]:
+            cpu_str = f"{r['cpu']:.1f}%"
+            lines.append(
+                f"{str(r['pid']):<6} {str(r['ms']):<13} {str(r['invoked']):<12} {str(r['usecs']):<6} {cpu_str:<6} {r['comm']}"
+            )
 
         lines.append("")
         lines.append(f"CPU utilization for five seconds: {cpu_5sec}%; one minute: {cpu_1min}%; five minutes: {cpu_5min}%")

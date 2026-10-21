@@ -18,7 +18,11 @@ ndk-agent/*_[0-9]*_*.deb
 ndk-agent/tmp/
 ndk-agent/BUILD_ROOT/
 
+# Containerlab runtime directories
+clab-*/
+
 # AI and Agent artifacts
+.agent/
 .gemini/
 .cursor/
 .claude/

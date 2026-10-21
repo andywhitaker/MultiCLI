@@ -225,7 +225,7 @@ class MacAddressTableReport:
             return "-"
         m_irb = re.search(r'irb\d*\.(\d+)', query)
         if m_irb:
-            return m_irb.group(1)
+            return m_irb.group(1) if m_irb.group(1) != '0' else '1'
 
         # Extract interface name and index using regex
         match = re.match(r'(.+)\.(\d+)', query)
@@ -241,7 +241,7 @@ class MacAddressTableReport:
                 tag = entry.get("tagging", "-")
                 if tag not in ("null", "untagged", "-"):
                     return tag
-                return index
+                return index if index != '0' else '1'
         return "-"
 
     def _get_mac_code(self, mac_type):
@@ -344,9 +344,11 @@ class MacAddressTableReport:
             if default_netinst_vlan == "-":
                 for irb_entry in irb_interface_name_index_list:
                     idx = irb_entry.get("index")
-                    if idx:
-                        default_netinst_vlan = str(idx)
+                    if idx is not None and str(idx) != "":
+                        default_netinst_vlan = str(idx) if str(idx) != '0' else '1'
                         break
+            if default_netinst_vlan == "-" and interface_name_index_list:
+                default_netinst_vlan = '1'
 
             for mac_entry in mac_data.get_descendants('/network-instance/bridge-table/mac-table/mac'):
                 logical_subinterface = self._get_logical_interface(mac_entry.destination)

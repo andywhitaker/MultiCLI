@@ -13,6 +13,8 @@ def format_cisco_intf(name, short=True):
     if not name:
         return "-"
     name = str(name).strip()
+    if name.startswith('irb'):
+        return name
     if name.endswith('.0'):
         name = name[:-2]
     if name.startswith('ethernet-'):
@@ -446,8 +448,6 @@ class CiscoInterfaceReports:
                     mem_items = []
                     if hasattr(lag_node, 'member'):
                         mem_items = lag_node.member.items()
-                    elif hasattr(lag_node, 'member_interface'):
-                        mem_items = lag_node.member_interface.items()
                     for mem in mem_items:
                         m_name = format_cisco_intf(mem.name, short=True)
                         m_oper = getattr(mem, 'oper_state', 'down')
@@ -708,9 +708,21 @@ class CiscoInterfaceReports:
                 try:
                     if hasattr(eth, 'statistics') and eth.statistics.exists():
                         eth_stats = eth.statistics.get()
-                        crc_errors = getattr(eth_stats, 'in_crc_error_frames', 0) or 0
-                        giants = getattr(eth_stats, 'in_oversize_frames', 0) or 0
-                        runts = getattr(eth_stats, 'in_undersize_frames', 0) or 0
+                        try:
+                            crc_errors = getattr(eth_stats, 'in_crc_error_frames', 0) or 0
+                        except Exception:
+                            crc_errors = 0
+                        try:
+                            giants = getattr(eth_stats, 'in_oversize_frames', 0) or 0
+                        except Exception:
+                            giants = 0
+                        try:
+                            runts = getattr(eth_stats, 'in_undersize_frames', 0) or 0
+                        except Exception:
+                            try:
+                                runts = getattr(eth_stats, 'in_fragment_frames', 0) or 0
+                            except Exception:
+                                runts = 0
                 except Exception:
                     pass
 
@@ -718,9 +730,12 @@ class CiscoInterfaceReports:
             in_bps = 0
             out_bps = 0
             if hasattr(intf, 'traffic_rate') and intf.traffic_rate.exists():
-                tr = intf.traffic_rate.get()
-                in_bps = getattr(tr, 'in_bps', 0) or 0
-                out_bps = getattr(tr, 'out_bps', 0) or 0
+                try:
+                    tr = intf.traffic_rate.get()
+                    in_bps = getattr(tr, 'in_bps', 0) or 0
+                    out_bps = getattr(tr, 'out_bps', 0) or 0
+                except Exception:
+                    pass
 
             in_pkts = 0
             in_octets = 0
@@ -737,18 +752,24 @@ class CiscoInterfaceReports:
 
             if hasattr(intf, 'statistics') and intf.statistics.exists():
                 stats = intf.statistics.get()
-                in_pkts = getattr(stats, 'in_packets', 0) or 0
-                in_octets = getattr(stats, 'in_octets', 0) or 0
-                in_multi = getattr(stats, 'in_multicast_packets', 0) or 0
-                in_bcast = getattr(stats, 'in_broadcast_packets', 0) or 0
-                in_errors = getattr(stats, 'in_error_packets', 0) or 0
-                out_pkts = getattr(stats, 'out_packets', 0) or 0
-                out_octets = getattr(stats, 'out_octets', 0) or 0
-                out_multi = getattr(stats, 'out_multicast_packets', 0) or 0
-                out_bcast = getattr(stats, 'out_broadcast_packets', 0) or 0
-                out_errors = getattr(stats, 'out_error_packets', 0) or 0
-                carrier_transitions = getattr(stats, 'carrier_transitions', 0) or 0
-                intf_resets = getattr(stats, 'interface_transitions', None)
+                def _sget(attr, default=0):
+                    try:
+                        v = getattr(stats, attr, default)
+                        return default if v is None else v
+                    except Exception:
+                        return default
+                in_pkts = _sget('in_packets', 0)
+                in_octets = _sget('in_octets', 0)
+                in_multi = _sget('in_multicast_packets', 0)
+                in_bcast = _sget('in_broadcast_packets', 0)
+                in_errors = _sget('in_error_packets', 0)
+                out_pkts = _sget('out_packets', 0)
+                out_octets = _sget('out_octets', 0)
+                out_multi = _sget('out_multicast_packets', 0)
+                out_bcast = _sget('out_broadcast_packets', 0)
+                out_errors = _sget('out_error_packets', 0)
+                carrier_transitions = _sget('carrier_transitions', 0)
+                intf_resets = _sget('interface_transitions', None)
                 if intf_resets is None:
                     intf_resets = carrier_transitions
 
@@ -776,15 +797,26 @@ class CiscoInterfaceReports:
                 block_lines.append(f"  Description: {desc}")
             if ip_line:
                 block_lines.append(ip_line)
+            bw_bps = bw_kbit * 1000
+            txload = max(1, min(255, int((out_bps / bw_bps) * 255) + 1)) if bw_bps > 0 else 1
+            rxload = max(1, min(255, int((in_bps / bw_bps) * 255) + 1)) if bw_bps > 0 else 1
+            tot_pkts = in_pkts + out_pkts
+            tot_errs = in_errors + out_errors
+            reliability = max(1, min(255, int(255 * (1.0 - (tot_errs / tot_pkts))))) if tot_pkts > 0 and tot_errs > 0 else 255
+            try:
+                raw_tpid = str(getattr(intf, 'tpid', '') or '')
+            except Exception:
+                raw_tpid = ''
+            ethertype = "0x88a8" if "88A8" in raw_tpid.upper() else "0x8100"
             block_lines.extend([
                 f"  MTU {mtu} bytes, BW {bw_kbit} Kbit",
-                f"  reliability 255/255, txload 1/255, rxload 1/255",
+                f"  reliability {reliability}/255, txload {txload}/255, rxload {rxload}/255",
                 f"  Encapsulation ARPA, medium is broadcast",
                 f"  Port mode is {mode_str}",
                 f"  {duplex}-duplex, {speed_val}",
                 f"  Auto-Negotiation is turned {auto_neg}",
                 f"  Rate mode is dedicated",
-                f"  EtherType is 0x8100",
+                f"  EtherType is {ethertype}",
                 f"  {carrier_transitions} link status changes since last clear",
                 f"  Last clearing of \"show interface\" counters never",
                 f"  {intf_resets} interface resets",

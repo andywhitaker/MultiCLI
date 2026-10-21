@@ -172,7 +172,8 @@ class BgpSummaryFilter(object):
             Prints output for command
 
         """
-        
+        self.__init__()
+
         # Getting BGP information and assigning it to Class variables
         self._getBgpSummary_(state, arguments)
         self._getBgpNeighborList_(state, arguments)
@@ -199,7 +200,7 @@ class BgpSummaryFilter(object):
         result = Data(arguments.schema)
 
         # Dumping BGP information 
-        bgp = result.bgp.create(self._router_id)
+        bgp = result.bgp.create(self._router_id or '0.0.0.0')
         bgp.asn = self._asn
         bgp.local_as = self._local_as
         bgp.admin_state = self._admin_state
@@ -270,29 +271,44 @@ class BgpSummaryFilter(object):
 
         # building path using network-instance value entered via CLI
         path = build_path('/network-instance[name={name}]/protocols/bgp',name=self._netinst)
-        data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
-        
-        self._router_id = data.network_instance.get().protocols.get().bgp.get().router_id
-        self._asn = data.network_instance.get().protocols.get().bgp.get().autonomous_system
-        self._local_as = data.network_instance.get().protocols.get().bgp.get().autonomous_system
-        self._admin_state = data.network_instance.get().protocols.get().bgp.get().admin_state
-        self._oper_state = data.network_instance.get().protocols.get().bgp.get().oper_state
+        try:
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
+            bgp_node = data.network_instance.get().protocols.get().bgp.get()
+        except Exception:
+            self._router_id = "0.0.0.0"
+            self._asn = 0
+            self._local_as = 0
+            self._admin_state = "disable"
+            self._oper_state = "down"
+            self._groups = 0
+            self._neighbors = 0
+            self._path_memory = 0
+            self._total_paths = 0
+            return
+
+        self._router_id = getattr(bgp_node, 'router_id', None) or "0.0.0.0"
+        self._asn = getattr(bgp_node, 'autonomous_system', None) or 0
+        self._local_as = self._asn
+        self._admin_state = getattr(bgp_node, 'admin_state', None) or "disable"
+        self._oper_state = getattr(bgp_node, 'oper_state', None) or "down"
 
         self._groups = 0
-        for group in data.network_instance.get().protocols.get().bgp.get().group.items():
-            self._groups += 1
+        if hasattr(bgp_node, 'group'):
+            for group in bgp_node.group.items():
+                self._groups += 1
 
         self._neighbors = 0
-        for group in data.network_instance.get().protocols.get().bgp.get().neighbor.items():
-            self._neighbors += 1
+        if hasattr(bgp_node, 'neighbor'):
+            for group in bgp_node.neighbor.items():
+                self._neighbors += 1
 
         try:
-            self._path_memory = data.network_instance.get().protocols.get().bgp.get().statistics.get().path_memory
+            self._path_memory = bgp_node.statistics.get().path_memory or 0
         except Exception:
             self._path_memory = 0
 
         try:
-            self._total_paths = data.network_instance.get().protocols.get().bgp.get().statistics.get().total_paths
+            self._total_paths = bgp_node.statistics.get().total_paths or 0
         except Exception:
             self._total_paths = 0
 
@@ -313,12 +329,14 @@ class BgpSummaryFilter(object):
         
         # building path using network-instance value entered via CLI for all BGP Neighbors
         path = build_path('/network-instance[name={name}]/protocols/bgp/neighbor[peer-address=*]',name=self._netinst)
-        data: Data = state.server.get_data_store(DataStore.State).get_data(path, recursive=False)
-
-        # getting peer-address from state datastore
         neighbor_list = []
-        for neighbor_path in data.network_instance.get().protocols.get().bgp.get().neighbor.items():
-            neighbor_list.append(neighbor_path.peer_address)
+        try:
+            data: Data = state.server.get_data_store(DataStore.State).get_data(path, recursive=False)
+            for neighbor_path in data.network_instance.get().protocols.get().bgp.get().neighbor.items():
+                neighbor_list.append(neighbor_path.peer_address)
+        except Exception:
+            self._neighbor_data = {}
+            return
         
         # geting information per BGP Neighbor on a dictionary
         neighbor_data = {}
@@ -327,60 +345,70 @@ class BgpSummaryFilter(object):
 
             path = build_path('/network-instance[name={name}]/protocols/bgp/neighbor[peer-address={ip}]',name=self._netinst,ip=neighbor_ip)
             data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
+            n_node = data.network_instance.get().protocols.get().bgp.get().neighbor.get()
 
-            neighbor_data[neighbor_ip]['ip'] = data.network_instance.get().protocols.get().bgp.get().neighbor.get().peer_address
-            neighbor_data[neighbor_ip]['asn'] = data.network_instance.get().protocols.get().bgp.get().neighbor.get().peer_as
-            neighbor_data[neighbor_ip]['pkts_received'] = data.network_instance.get().protocols.get().bgp.get().neighbor.get().received_messages.get().total_messages
-            neighbor_data[neighbor_ip]['pkts_sent'] = data.network_instance.get().protocols.get().bgp.get().neighbor.get().sent_messages.get().total_messages
+            neighbor_data[neighbor_ip]['ip'] = n_node.peer_address
+            neighbor_data[neighbor_ip]['asn'] = getattr(n_node, 'peer_as', 0) or 0
+            try:
+                neighbor_data[neighbor_ip]['pkts_received'] = n_node.received_messages.get().total_messages or 0
+            except Exception:
+                neighbor_data[neighbor_ip]['pkts_received'] = 0
+            try:
+                neighbor_data[neighbor_ip]['pkts_sent'] = n_node.sent_messages.get().total_messages or 0
+            except Exception:
+                neighbor_data[neighbor_ip]['pkts_sent'] = 0
             
             # information available only if BGP Session is Established
-            neighbor_data[neighbor_ip]['session_state'] = data.network_instance.get().protocols.get().bgp.get().neighbor.get().session_state
+            neighbor_data[neighbor_ip]['session_state'] = getattr(n_node, 'session_state', 'idle') or 'idle'
             if neighbor_data[neighbor_ip]['session_state'] == 'established':
-                neighbor_data[neighbor_ip]['uptime'] = data.network_instance.get().protocols.get().bgp.get().neighbor.get().last_established
-                neighbor_data[neighbor_ip]['routes_received'] = data.network_instance.get().protocols.get().bgp.get().neighbor.get().afi_safi.get().received_routes
-                neighbor_data[neighbor_ip]['routes_active'] = data.network_instance.get().protocols.get().bgp.get().neighbor.get().afi_safi.get().active_routes
-                neighbor_data[neighbor_ip]['routes_sent'] = data.network_instance.get().protocols.get().bgp.get().neighbor.get().afi_safi.get().sent_routes
+                neighbor_data[neighbor_ip]['uptime'] = getattr(n_node, 'last_established', 0)
+                neighbor_data[neighbor_ip]['routes_received'] = getattr(n_node.afi_safi.get(), 'received_routes', 0) or 0
+                neighbor_data[neighbor_ip]['routes_active'] = getattr(n_node.afi_safi.get(), 'active_routes', 0) or 0
+                neighbor_data[neighbor_ip]['routes_sent'] = getattr(n_node.afi_safi.get(), 'sent_routes', 0) or 0
             
                 # geting all afi_safi information per BGP neighbor only for Enabled afi_safi
                 counter = 0
-                for afi_safi in data.network_instance.get().protocols.get().bgp.get().neighbor.get().afi_safi.items():
+                for afi_safi in n_node.afi_safi.items():
                     if afi_safi.admin_state == "enable":
+                        rcv_r = getattr(afi_safi, 'received_routes', 0) or 0
+                        act_r = getattr(afi_safi, 'active_routes', 0) or 0
+                        snt_r = getattr(afi_safi, 'sent_routes', 0) or 0
                         neighbor_data[neighbor_ip][f'afi_safi_{counter}'] = {}
                         neighbor_data[neighbor_ip][f'afi_safi_{counter}']['admin_state'] = afi_safi.admin_state
                         neighbor_data[neighbor_ip][f'afi_safi_{counter}']['name'] = afi_safi.afi_safi_name
-                        neighbor_data[neighbor_ip][f'afi_safi_{counter}']['received_routes'] = afi_safi.received_routes
-                        neighbor_data[neighbor_ip][f'afi_safi_{counter}']['active_routes'] = afi_safi.active_routes
-                        neighbor_data[neighbor_ip][f'afi_safi_{counter}']['sent_routes'] = afi_safi.sent_routes
+                        neighbor_data[neighbor_ip][f'afi_safi_{counter}']['received_routes'] = rcv_r
+                        neighbor_data[neighbor_ip][f'afi_safi_{counter}']['active_routes'] = act_r
+                        neighbor_data[neighbor_ip][f'afi_safi_{counter}']['sent_routes'] = snt_r
                         counter += 1
             
                         # getting total BGP stats
                         if afi_safi.afi_safi_name == 'ipv4-unicast':
-                            self._stats['total_ipv4_remote_rts'] += afi_safi.received_routes
+                            self._stats['total_ipv4_remote_rts'] += rcv_r
                             self._stats['total_ipv4_backup_rts'] += 0
-                            self._stats['total_ipv4_rem_active_rts'] += afi_safi.active_routes
+                            self._stats['total_ipv4_rem_active_rts'] += act_r
                         elif afi_safi.afi_safi_name == 'ipv6-unicast':
-                            self._stats['total_ipv6_remote_rts'] += afi_safi.received_routes
+                            self._stats['total_ipv6_remote_rts'] += rcv_r
                             self._stats['total_ipv6_backup_rts'] += 0
-                            self._stats['total_ipv6_rem_active_rts'] += afi_safi.active_routes
+                            self._stats['total_ipv6_rem_active_rts'] += act_r
                         elif afi_safi.afi_safi_name == 'evpn':
-                            self._stats['total_evpn_rem_rts'] += afi_safi.received_routes
-                            self._stats['total_evpn_rem_act_rts'] += afi_safi.active_routes
+                            self._stats['total_evpn_rem_rts'] += rcv_r
+                            self._stats['total_evpn_rem_act_rts'] += act_r
                         elif afi_safi.afi_safi_name == 'ipv4-labeled-unicast':
-                            self._stats['total_lblipv4_rem_rts'] += afi_safi.received_routes
+                            self._stats['total_lblipv4_rem_rts'] += rcv_r
                             self._stats['total_lblipv4_bkp_rts'] += 0
-                            self._stats['total_lblipv4_rem_act_rts'] += afi_safi.active_routes
+                            self._stats['total_lblipv4_rem_act_rts'] += act_r
                         elif afi_safi.afi_safi_name == 'ipv6-labeled-unicast':
-                            self._stats['total_lblipv6_rem_rts'] += afi_safi.received_routes
+                            self._stats['total_lblipv6_rem_rts'] += rcv_r
                             self._stats['total_lblipv6_bkp_rts'] += 0
-                            self._stats['total_lblipv6_rem_act_rts'] += afi_safi.active_routes
+                            self._stats['total_lblipv6_rem_act_rts'] += act_r
                         elif afi_safi.afi_safi_name == 'l3vpn-ipv4-unicast':
-                            self._stats['total_vpn_ipv4_rem_rts'] += afi_safi.received_routes
+                            self._stats['total_vpn_ipv4_rem_rts'] += rcv_r
                             self._stats['total_vpn_ipv4_bkup_rts'] += 0
-                            self._stats['total_vpn_ipv4_rem_act_rts'] += afi_safi.active_routes
+                            self._stats['total_vpn_ipv4_rem_act_rts'] += act_r
                         elif afi_safi.afi_safi_name == 'l3vpn-ipv6-unicast':
-                            self._stats['total_vpn_ipv6_rem_rts'] += afi_safi.received_routes
+                            self._stats['total_vpn_ipv6_rem_rts'] += rcv_r
                             self._stats['total_vpn_ipv6_bkup_rts'] += 0
-                            self._stats['total_vpn_ipv6_rem_act_rts'] += afi_safi.active_routes
+                            self._stats['total_vpn_ipv6_rem_act_rts'] += act_r
 
             # if BGP Session is not Established, empty values
             else:

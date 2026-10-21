@@ -141,20 +141,20 @@ class IpBgpReport:
                             if hasattr(neighbor, 'received_messages'):
                                 rm = neighbor.received_messages.get()
                                 if rm:
-                                    messages_received = getattr(rm, 'total_messages', 0)
-                                    received_queue = getattr(rm, 'queue_depth', 0)
+                                    messages_received = getattr(rm, 'total_messages', 0) or 0
+                                    received_queue = getattr(rm, 'queue_depth', 0) or 0
                         
                             if hasattr(neighbor, 'sent_messages'):
                                 sm = neighbor.sent_messages.get()
                                 if sm:
-                                    messages_sent = getattr(sm, 'total_messages', 0)
-                                    sent_queue = getattr(sm, 'queue_depth', 0)
+                                    messages_sent = getattr(sm, 'total_messages', 0) or 0
+                                    sent_queue = getattr(sm, 'queue_depth', 0) or 0
                             # Get prefix information
                             prefixes_received = 0
                             prefixes_accepted = 0                                       
-                            if hasattr(afi_safi, 'received_routes'):
+                            if hasattr(afi_safi, 'received_routes') and afi_safi.received_routes is not None:
                                 prefixes_received = afi_safi.received_routes
-                            if hasattr(afi_safi, 'active_routes'):
+                            if hasattr(afi_safi, 'active_routes') and afi_safi.active_routes is not None:
                                 prefixes_accepted = afi_safi.active_routes
                 
                             # Format uptime

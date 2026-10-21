@@ -216,7 +216,7 @@ class EthernetSwitchingReport:
             return "-"
         m_irb = re.search(r'irb\d*\.(\d+)', query)
         if m_irb:
-            return m_irb.group(1)
+            return m_irb.group(1) if m_irb.group(1) != '0' else '1'
         # Extract interface name and index using regex
         match = re.match(r'(.+)\.(\d+)', query)
         if not match:
@@ -230,7 +230,7 @@ class EthernetSwitchingReport:
                 tag = entry.get("tagging", "-")
                 if tag not in ("null", "untagged", "-"):
                     return tag
-                return index
+                return index if index != '0' else '1'
         return "-"
 
     def _get_mac_code(self, mac_type, active):
@@ -248,6 +248,9 @@ class EthernetSwitchingReport:
             for irb in irb_interface_name_index_list:
                 if irb["hw_mac"] == mac_entry_address or irb["anycast_gw_mac"] == mac_entry_address:
                     logical_interface = f'{irb["name"]}.{irb["index"]}(R)'
+            if logical_interface == "irb(R)" and irb_interface_name_index_list:
+                first_irb = irb_interface_name_index_list[0]
+                logical_interface = f'{first_irb["name"]}.{first_irb["index"]}(R)'
         elif match_else:
             logical_interface = match_else.group()
         else:
@@ -289,9 +292,11 @@ class EthernetSwitchingReport:
             if default_netinst_vlan == "-":
                 for irb_entry in irb_interface_name_index_list:
                     idx = irb_entry.get("index")
-                    if idx:
-                        default_netinst_vlan = str(idx)
+                    if idx is not None and str(idx) != "":
+                        default_netinst_vlan = str(idx) if str(idx) != '0' else '1'
                         break
+            if default_netinst_vlan == "-" and interface_name_index_list:
+                default_netinst_vlan = '1'
 
             for mac_entry in mac_data.get_descendants('/network-instance/bridge-table/mac-table/mac'):
                 logical_subinterface = self._get_logical_interface(mac_entry.address, mac_entry.destination, irb_interface_name_index_list)

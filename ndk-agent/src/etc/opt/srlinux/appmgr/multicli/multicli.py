@@ -237,18 +237,31 @@ def process_notification(notification):
 
     if notification.HasField("config"):
 
-        if notification.config.HasField("data"):
+        if notification.config.op == config_service_pb2.ConfigNotification.Operation.Delete:
+            logging.info("--> Received config delete notification; cleaning MultiCLI assets")
+            clean_multicli_assets(cli_plugins_dir)
+            update_state_datastore(
+                js_path='.multicli',
+                js_data=json.dumps({"enabled-nos": "none", "repo-url": "", "error-messages": "No errors"})
+            )
+        elif notification.config.HasField("data"):
 
             logging.info("--> Received config notification")
             logging.info(notification.config)
-            data = json.loads(notification.config.data.json)
+            data = json.loads(notification.config.data.json) if notification.config.data.json else {}
 
             if enabled_nos_command in data:
-
+                repo_url = data.get(repo_url_command, "https://github.com/srl-labs/multicli/archive/refs/heads/main.zip")
                 logging.info(f"Selected NOS: {data[enabled_nos_command]}")
-                logging.info(f"Repo URL: {data[repo_url_command]}")
+                logging.info(f"Repo URL: {repo_url}")
 
-                multicli_function(data[enabled_nos_command], data[repo_url_command]) # Main MultiCLI Agent Function with all the Magic!
+                multicli_function(data[enabled_nos_command], repo_url) # Main MultiCLI Agent Function with all the Magic!
+            elif not data:
+                clean_multicli_assets(cli_plugins_dir)
+                update_state_datastore(
+                    js_path='.multicli',
+                    js_data=json.dumps({"enabled-nos": "none", "repo-url": "", "error-messages": "No errors"})
+                )
 
     else:
         logging.info("--> Received unexpected notification")
@@ -372,6 +385,14 @@ def multicli_function(selected_nos, seleceted_repo_url):
     # Clean only MultiCLI files and subdirectories, preserving all other user plugins
     clean_multicli_assets(cli_plugins_dir)
 
+    if selected_nos == 'none':
+        logging.info("MultiCLI disabled (enabled-nos set to 'none').")
+        update_state_datastore(
+            js_path='.multicli',
+            js_data=json.dumps({"enabled-nos": "none", "repo-url": seleceted_repo_url, "error-messages": "No errors"})
+        )
+        return
+
     # Confirming that a NOS has been selected
     if selected_nos != 'none':
 
@@ -392,13 +413,13 @@ def multicli_function(selected_nos, seleceted_repo_url):
                         extracted_root = None
                         for item in os.listdir(tmp_dir):
                             full = os.path.join(tmp_dir, item)
-                            if os.path.isdir(full) and item.startswith("MultiCLI"):
+                            if os.path.isdir(full) and item.lower().startswith("multicli"):
                                 extracted_root = full
                                 break
                         if not extracted_root:
                             extracted_root = os.path.join(tmp_dir, "MultiCLI-main")
 
-                        present_dirs = {name for name in os.listdir(extracted_root) if os.path.isdir(os.path.join(extracted_root, name))}
+                        present_dirs = {name for name in os.listdir(extracted_root) if os.path.isdir(os.path.join(extracted_root, name))} if os.path.isdir(extracted_root) else set()
                         missing = required_dirs - present_dirs
                         if missing: # Corrupted file or a non-MultiCLI zip
                             logging.info("The downloaded MultiCLI repository is corrupted")

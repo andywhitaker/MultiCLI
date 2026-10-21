@@ -11,6 +11,18 @@ import re
 from srlinux.location import build_path
 from srlinux.schema.data_store import DataStore
 
+
+def _safe_get(node, attr, default=None):
+    """Safely read an attribute from an SR Linux Data object without raising DataError."""
+    if node is None:
+        return default
+    try:
+        val = getattr(node, attr)
+        return val if val is not None else default
+    except Exception:
+        return default
+
+
 def format_mac_cisco_arista(mac_str):
     if not mac_str:
         return ""
@@ -23,6 +35,8 @@ def format_arista_intf(name, short=False):
     if not name:
         return ""
     name = str(name)
+    if name.startswith('irb'):
+        return name
     if name.endswith('.0'):
         name = name[:-2]
     if name.startswith('ethernet-'):
@@ -83,19 +97,19 @@ class AristaRoutingReports:
 
             # Build next-hop index to IP/interface mapping
             for nh in rt_data.get_descendants('/network-instance/route-table/next-hop'):
-                nh_idx = getattr(nh, 'index', None)
+                nh_idx = _safe_get(nh, 'index', None)
                 if nh_idx is None:
                     continue
 
-                nh_type = getattr(nh, 'type', None)
-                ip = getattr(nh, 'ip_address', None)
-                subif = getattr(nh, 'subinterface', None)
+                nh_type = _safe_get(nh, 'type', None)
+                ip = _safe_get(nh, 'ip_address', None)
+                subif = _safe_get(nh, 'subinterface', None)
                 resolving_nhg = None
 
                 if nh_type == 'tunnel' and hasattr(nh, 'tunnel'):
                     try:
                         t = nh.tunnel.get()
-                        pfx = getattr(t, 'ip_prefix', None)
+                        pfx = _safe_get(t, 'ip_prefix', None)
                         if pfx and not ip:
                             ip = str(pfx).split('/')[0]
                     except Exception:
@@ -104,9 +118,9 @@ class AristaRoutingReports:
                 if nh_type == 'indirect' and hasattr(nh, 'indirect'):
                     try:
                         ind = nh.indirect.get()
-                        rr = getattr(ind, 'resolving_route', None)
+                        rr = _safe_get(ind, 'resolving_route', None)
                         if rr:
-                            resolving_nhg = getattr(rr.get(), 'next_hop_group', None)
+                            resolving_nhg = _safe_get(rr.get(), 'next_hop_group', None)
                     except Exception:
                         pass
 
@@ -118,11 +132,11 @@ class AristaRoutingReports:
 
             # Build next-hop group mapping
             for nhg in rt_data.get_descendants('/network-instance/route-table/next-hop-group'):
-                nhg_idx = getattr(nhg, 'index', None)
+                nhg_idx = _safe_get(nhg, 'index', None)
                 if nhg_idx is not None and hasattr(nhg, 'next_hop'):
                     hops = []
                     for nh_item in nhg.next_hop.items():
-                        target_nh = getattr(nh_item, 'next_hop', None)
+                        target_nh = _safe_get(nh_item, 'next_hop', None)
                         if target_nh is not None and str(target_nh) in nh_map:
                             hops.append(nh_map[str(target_nh)])
                     nhg_map[str(nhg_idx)] = hops
@@ -137,11 +151,11 @@ class AristaRoutingReports:
                             break
 
             for r in rt_data.get_descendants('/network-instance/route-table/ipv4-unicast/route'):
-                pfx = getattr(r, 'ipv4_prefix', None)
+                pfx = _safe_get(r, 'ipv4_prefix', None)
                 if not pfx:
                     continue
-                rtype = str(getattr(r, 'route_type', '')).lower()
-                rowner = str(getattr(r, 'route_owner', '')).lower()
+                rtype = str(_safe_get(r, 'route_type', '')).lower()
+                rowner = str(_safe_get(r, 'route_owner', '')).lower()
 
                 if 'connected' in rowner or 'direct' in rowner or rtype in ('local', 'connected'):
                     code = ' C   '
@@ -156,9 +170,9 @@ class AristaRoutingReports:
                 else:
                     code = ' S   '
 
-                metric = getattr(r, 'metric', 0)
-                pref = getattr(r, 'preference', 0)
-                nhg_id = getattr(r, 'next_hop_group', None)
+                metric = _safe_get(r, 'metric', 0)
+                pref = _safe_get(r, 'preference', 0)
+                nhg_id = _safe_get(r, 'next_hop_group', None)
                 route_hops = nhg_map.get(str(nhg_id), [])
 
                 routes.append({
@@ -204,7 +218,7 @@ class AristaRoutingReports:
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line(f"Try SR Linux command: show network-instance {vrf} ipv4 route")
+        output.print_line(f"Try SR Linux command: show network-instance {vrf} route-table ipv4-unicast summary")
 
     def show_vrf(self, state, output):
         """Display Arista EOS style 'show vrf'."""
@@ -220,18 +234,18 @@ class AristaRoutingReports:
             for ni in bv_data.network_instance.items():
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
                     p_obj = ni.protocols.get()
-                    bgp_vpn = getattr(p_obj, 'bgp_vpn', None)
+                    bgp_vpn = _safe_get(p_obj, 'bgp_vpn', None)
                     if bgp_vpn and hasattr(bgp_vpn, 'exists') and bgp_vpn.exists():
                         bv_obj = bgp_vpn.get()
                         if hasattr(bv_obj, 'bgp_instance'):
                             for bi in bv_obj.bgp_instance.items():
-                                rd_val = getattr(bi, 'route_distinguisher', None)
+                                rd_val = _safe_get(bi, 'route_distinguisher', None)
                                 if rd_val:
                                     m = re.search(r'rd\s+([0-9\.:]+)', str(rd_val))
                                     if m:
                                         rd_by_ni[ni.name] = m.group(1)
                                     else:
-                                        rd_by_ni[ni.name] = str(getattr(rd_val, 'rd', rd_val)).strip()
+                                        rd_by_ni[ni.name] = str(_safe_get(rd_val, 'rd', rd_val)).strip()
                                     break
         except Exception:
             pass
@@ -252,7 +266,7 @@ class AristaRoutingReports:
             for ni in sorted(data.network_instance.items(), key=lambda x: str(x.name)):
                 try:
                     name = ni.name
-                    ni_type = getattr(ni, 'type', 'default')
+                    ni_type = _safe_get(ni, 'type', 'default')
                     rd = rd_by_ni.get(name, "-")
 
                     intfs = intfs_by_ni.get(name, [])
@@ -286,8 +300,8 @@ class AristaRoutingReports:
     def _get_vlan_for_ni(self, state, raw_intfs):
         """Extract VLAN ID for a mac-vrf network instance:
         1. Check member subinterfaces' single-tagged VLAN encapsulation.
-        2. Fall back to IRB subinterface index (e.g. irb0.1 -> 1).
-        3. Fall back to subinterface index if > 0.
+        2. Fall back to IRB subinterface index if > 0 (or 1 if 0).
+        3. Fall back to subinterface index if > 0 (or 1 if member exists).
         4. Fall back to '--'.
         """
         # 1. Single-tagged encapsulation from member subinterfaces
@@ -297,7 +311,7 @@ class AristaRoutingReports:
                 try:
                     p = build_path(f'/interface[name={p_name}]/subinterface[index={sub_idx}]/vlan/encap/single-tagged/vlan-id')
                     d = state.server.get_data_store(DataStore.State).get_data(p, recursive=False)
-                    vlan_val = getattr(d.interface.get().subinterface.get().vlan.get().encap.get().single_tagged.get(), 'vlan_id', None)
+                    vlan_val = _safe_get(d.interface.get().subinterface.get().vlan.get().encap.get().single_tagged.get(), 'vlan_id', None)
                     if vlan_val is not None:
                         return str(vlan_val)
                 except Exception:
@@ -308,7 +322,7 @@ class AristaRoutingReports:
             if 'irb' in intf_name:
                 m = re.search(r'irb\d*\.(\d+)', intf_name)
                 if m:
-                    return m.group(1)
+                    return m.group(1) if m.group(1) != '0' else '1'
 
         # 3. Fall back to subinterface index if > 0
         for intf_name in raw_intfs:
@@ -317,6 +331,8 @@ class AristaRoutingReports:
                 if sub_idx != '0':
                     return sub_idx
 
+        if raw_intfs:
+            return '1'
         return "--"
 
     def show_vlan(self, state, output):
@@ -341,11 +357,11 @@ class AristaRoutingReports:
         try:
             data = state.server.get_data_store(DataStore.State).get_data(path, recursive=False)
             for ni in sorted(data.network_instance.items(), key=lambda x: str(x.name)):
-                ni_type = getattr(ni, 'type', '')
+                ni_type = _safe_get(ni, 'type', '')
                 if ni_type != 'mac-vrf':
                     continue
                 name = ni.name
-                oper = getattr(ni, 'oper_state', 'up')
+                oper = _safe_get(ni, 'oper_state', 'up')
                 status = "active" if oper == "up" else "suspended"
 
                 ports = intfs_by_ni.get(name, [])
@@ -385,20 +401,20 @@ class AristaRoutingReports:
         path = build_path('/network-instance[name=*]/bridge-table/mac-table/mac[address=*]')
         try:
             data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
-            for ni in getattr(data, 'network_instance', []).items() if hasattr(data, 'network_instance') else []:
+            for ni in _safe_get(data, 'network_instance', []).items() if hasattr(data, 'network_instance') else []:
                 ni_name = ni.name
                 ni_vlan = vlan_by_ni.get(ni_name, "--")
-                bridge_table = getattr(ni, 'bridge_table', None)
+                bridge_table = _safe_get(ni, 'bridge_table', None)
                 if not bridge_table:
                     continue
-                mac_table = getattr(bridge_table.get(), 'mac_table', None)
+                mac_table = _safe_get(bridge_table.get(), 'mac_table', None)
                 if not mac_table:
                     continue
                 for entry in mac_table.get().mac.items():
-                    mac_addr = format_mac_cisco_arista(getattr(entry, 'address', ''))
-                    raw_type = getattr(entry, 'type', 'learnt')
+                    mac_addr = format_mac_cisco_arista(_safe_get(entry, 'address', ''))
+                    raw_type = _safe_get(entry, 'type', 'learnt')
                     mac_type = "STATIC" if ('irb' in raw_type or raw_type == 'static') else "DYNAMIC"
-                    dest = getattr(entry, 'destination', '')
+                    dest = _safe_get(entry, 'destination', '')
                     vlan_str = ni_vlan
                     if 'vxlan' in dest.lower():
                         m_vni = re.search(r'vni:(\d+)', dest)
@@ -432,7 +448,7 @@ class AristaRoutingReports:
             for ni in data.network_instance.items():
                 vrf = ni.name
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
-                    ospf = getattr(ni.protocols.get(), 'ospf', None)
+                    ospf = _safe_get(ni.protocols.get(), 'ospf', None)
                     if ospf and hasattr(ospf.get(), 'instance'):
                         for inst in ospf.get().instance.items():
                             if hasattr(inst, 'area'):
@@ -443,12 +459,12 @@ class AristaRoutingReports:
                                             if hasattr(intf, 'neighbor'):
                                                 for n in intf.neighbor.items():
                                                     found = True
-                                                    r_id = getattr(n, 'router_id', '--')
-                                                    adj_st = getattr(n, 'adjacency_state', None)
+                                                    r_id = _safe_get(n, 'router_id', '--')
+                                                    adj_st = _safe_get(n, 'adjacency_state')
                                                     n_state = str(adj_st).split(':')[-1].upper() if adj_st else '--'
-                                                    ip = getattr(n, 'address', '--')
-                                                    pri = getattr(n, 'priority', '--')
-                                                    dead = getattr(n, 'dead_time', None)
+                                                    ip = _safe_get(n, 'address', '--')
+                                                    pri = _safe_get(n, 'priority', '--')
+                                                    dead = _safe_get(n, 'dead_time')
                                                     if dead is not None:
                                                         try:
                                                             d_sec = int(dead)
@@ -482,7 +498,7 @@ class AristaRoutingReports:
             for ni in data.network_instance.items():
                 vrf = ni.name
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
-                    isis = getattr(ni.protocols.get(), 'isis', None)
+                    isis = _safe_get(ni.protocols.get(), 'isis', None)
                     if isis and hasattr(isis.get(), 'instance'):
                         for inst in isis.get().instance.items():
                             inst_name = inst.name
@@ -492,12 +508,12 @@ class AristaRoutingReports:
                                     if hasattr(iface, 'adjacency'):
                                         for adj in iface.adjacency.items():
                                             found = True
-                                            sys_id = getattr(adj, 'neighbor_system_id', '--')
-                                            level = getattr(adj, 'adjacency_level', '2')
+                                            sys_id = _safe_get(adj, 'neighbor_system_id', '--')
+                                            level = _safe_get(adj, 'adjacency_level', '2')
                                             type_str = f"L{level}" if not str(level).startswith('L') else str(level)
-                                            raw_st = getattr(adj, 'state', '--')
+                                            raw_st = _safe_get(adj, 'state', '--')
                                             oper = str(raw_st).split(':')[-1].upper() if raw_st else '--'
-                                            hold = getattr(adj, 'remaining_holdtime', '--')
+                                            hold = _safe_get(adj, 'remaining_holdtime', '--')
                                             lines.append(f"{inst_name:<13} {vrf:<12} {sys_id:<15} {type_str:<4} {intf_name:<18} {'-':<8} {str(hold):<8} {oper}")
         except Exception:
             pass
@@ -517,18 +533,22 @@ class AristaRoutingReports:
         ]
         intf_ip_map = {}
         try:
-            intf_path = build_path('/interface[name=*]/subinterface[index=*]/ipv4/address')
-            intf_data = state.server.get_data_store(DataStore.State).get_data(intf_path, recursive=False)
+            intf_path = build_path('/interface[name=*]/subinterface[index=*]/ipv4/address[ip-prefix=*]')
+            intf_data = state.server.get_data_store(DataStore.State).get_data(intf_path, recursive=True)
             for intf in intf_data.interface.items():
-                if hasattr(intf, 'subinterface'):
-                    for sub in intf.subinterface.items():
+                sub_list = _safe_get(intf, 'subinterface')
+                if sub_list is not None:
+                    for sub in sub_list.items():
                         full_name = f"{intf.name}.{sub.index}"
-                        if hasattr(sub, 'ipv4') and sub.ipv4.exists():
-                            ipv4_node = sub.ipv4.get()
-                            if hasattr(ipv4_node, 'address'):
-                                for a in ipv4_node.address.items():
-                                    if hasattr(a, 'ip_prefix') and a.ip_prefix:
-                                        intf_ip_map[full_name] = str(a.ip_prefix)
+                        ipv4_c = _safe_get(sub, 'ipv4')
+                        if ipv4_c is not None and ipv4_c.exists():
+                            ipv4_node = ipv4_c.get()
+                            addr_list = _safe_get(ipv4_node, 'address')
+                            if addr_list is not None:
+                                for a in addr_list.items():
+                                    pfx = _safe_get(a, 'ip_prefix')
+                                    if pfx:
+                                        intf_ip_map[full_name] = str(pfx)
                                         break
         except Exception:
             pass
@@ -540,7 +560,7 @@ class AristaRoutingReports:
             for ni in data.network_instance.items():
                 vrf = ni.name
                 if hasattr(ni, 'protocols') and ni.protocols.exists():
-                    ospf = getattr(ni.protocols.get(), 'ospf', None)
+                    ospf = _safe_get(ni.protocols.get(), 'ospf', None)
                     if ospf and hasattr(ospf.get(), 'instance'):
                         for inst in ospf.get().instance.items():
                             inst_name = inst.name
@@ -552,10 +572,10 @@ class AristaRoutingReports:
                                             found = True
                                             raw_name = str(iface.interface_name)
                                             intf_disp = format_arista_intf(raw_name, short=False)
-                                            cost = getattr(iface, 'interface_cost', 10)
-                                            st = str(getattr(iface, 'oper_state', 'down')).upper()
-                                            nbrs = getattr(iface, 'neighbor_count', 0)
-                                            ip_mask = intf_ip_map.get(raw_name, "--")
+                                            cost = _safe_get(iface, 'metric', 10)
+                                            st = str(_safe_get(iface, 'oper_state', 'down')).upper()
+                                            nbrs = _safe_get(iface, 'neighbor_count', 0)
+                                            ip_mask = intf_ip_map.get(raw_name) or str(_safe_get(iface, 'local_ip_address', '--') or '--')
                                             lines.append(f"{intf_disp:<16} {inst_name:<9} {vrf:<9} {str(area_id):<16} {ip_mask:<19} {str(cost):<6} {st:<7} {str(nbrs)}")
         except Exception:
             pass
@@ -585,15 +605,69 @@ class AristaRoutingReports:
                     if hasattr(bi, 'ethernet_segment'):
                         for es in bi.ethernet_segment.items():
                             found = True
-                            esi = getattr(es, 'esi', '--')
-                            intf = getattr(es, 'interface', '') or '--'
-                            domain_id = getattr(bi, 'id', 1)
-                            admin_st = getattr(es, 'admin_state', 'enable')
-                            oper_st = getattr(es, 'oper_state', 'down')
+                            intf = '--'
+                            try:
+                                intf_attr = _safe_get(es, 'interface')
+                                if isinstance(intf_attr, str) and intf_attr:
+                                    intf = intf_attr
+                                elif intf_attr is not None and hasattr(intf_attr, 'items'):
+                                    for item in intf_attr.items():
+                                        for field in ('ethernet_interface', 'interface_name', 'name'):
+                                            val = _safe_get(item, field)
+                                            if val:
+                                                intf = str(val)
+                                                break
+                                        if intf != '--':
+                                            break
+                                elif intf_attr is not None:
+                                    m = re.search(r'interface\s+(\S+)', str(intf_attr))
+                                    if m:
+                                        intf = m.group(1)
+                            except Exception:
+                                intf = '--'
+                            domain_id = _safe_get(bi, 'id', 1)
+                            admin_st = _safe_get(es, 'admin_state', 'enable')
+                            oper_st = _safe_get(es, 'oper_state', 'down')
                             mlag_state = "Active" if (admin_st == "enable" and oper_st == "up") else "Inactive"
 
                             intf_fmt = format_arista_intf(intf, short=True) if intf != '--' else '--'
                             peer_addr = "--"
+                            try:
+                                local_sys_ips = set()
+                                try:
+                                    sys_p = build_path('/interface[name=system0]/subinterface[index=*]/ipv4/address[ip-prefix=*]')
+                                    sys_d = state.server.get_data_store(DataStore.State).get_data(sys_p, recursive=True)
+                                    for s_intf in sys_d.interface.items():
+                                        for s_sub in s_intf.subinterface.items():
+                                            if hasattr(s_sub, 'ipv4') and s_sub.ipv4.exists():
+                                                for a_obj in s_sub.ipv4.get().address.items():
+                                                    ip_p = _safe_get(a_obj, 'ip_prefix')
+                                                    if ip_p:
+                                                        local_sys_ips.add(str(ip_p).split('/')[0])
+                                except Exception:
+                                    pass
+                                assoc = _safe_get(es, 'association')
+                                if assoc is not None and assoc.exists():
+                                    assoc_node = assoc.get()
+                                    if hasattr(assoc_node, 'network_instance'):
+                                        for assoc_ni in assoc_node.network_instance.items():
+                                            if hasattr(assoc_ni, 'bgp_instance'):
+                                                for assoc_bi in assoc_ni.bgp_instance.items():
+                                                    cdfc = _safe_get(assoc_bi, 'computed_designated_forwarder_candidates')
+                                                    if cdfc is not None and cdfc.exists():
+                                                        cdfc_node = cdfc.get()
+                                                        if hasattr(cdfc_node, 'designated_forwarder_candidate'):
+                                                            for cand in cdfc_node.designated_forwarder_candidate.items():
+                                                                c_addr = _safe_get(cand, 'address')
+                                                                if c_addr and str(c_addr) not in local_sys_ips:
+                                                                    peer_addr = str(c_addr)
+                                                                    break
+                                                    if peer_addr != "--":
+                                                        break
+                                            if peer_addr != "--":
+                                                break
+                            except Exception:
+                                pass
                             lines = [
                                 "MLAG Configuration:",
                                 f"domain-id           : {domain_id}",

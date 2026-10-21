@@ -71,11 +71,7 @@ for ARCH in "${ARCH_LIST[@]}"; do
     OUTPUT_DEB="$SCRIPT_DIR/srl-multicli_${ARCH}.deb"
     dpkg-deb --build --root-owner-group "$BUILD_ROOT" "$OUTPUT_DEB" >/dev/null
 
-    # Create canonical versioned package copy for releases
-    VERSIONED_DEB="$SCRIPT_DIR/srl-multicli_${VERSION}_${ARCH}.deb"
-    cp -f "$OUTPUT_DEB" "$VERSIONED_DEB"
-
-    echo "==> Generated: $OUTPUT_DEB and $VERSIONED_DEB ($(ls -lh "$OUTPUT_DEB" | awk '{print $5}'))"
+    echo "==> Generated: $OUTPUT_DEB ($(ls -lh "$OUTPUT_DEB" | awk '{print $5}'))"
     rm -rf "$BUILD_ROOT"
 done
 

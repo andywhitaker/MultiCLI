@@ -50,6 +50,10 @@ fi
 # Infer default persona if not explicitly passed
 if [ -z "$DEFAULT_PERSONA" ]; then
     case "$TARGET_NODE" in
+        *leaf1-1*) DEFAULT_PERSONA="arista" ;;
+        *leaf1-2*) DEFAULT_PERSONA="cisco" ;;
+        *leaf2-1*) DEFAULT_PERSONA="juniper" ;;
+        *leaf2-2*) DEFAULT_PERSONA="nokia" ;;
         *leaf1*) DEFAULT_PERSONA="arista" ;;
         *leaf2*) DEFAULT_PERSONA="cisco" ;;
         *leaf3*) DEFAULT_PERSONA="juniper" ;;
@@ -117,6 +121,11 @@ for part in "${ADDR[@]}"; do
             VENDORS=("arista" "cisco-nx" "juniper" "nokia")
             break
             ;;
+        none)
+            VENDORS=()
+            DEFAULT_PERSONA="none"
+            break
+            ;;
         arista|eos)
             VENDORS+=("arista")
             ;;
@@ -130,7 +139,7 @@ for part in "${ADDR[@]}"; do
             VENDORS+=("nokia")
             ;;
         *)
-            echo "Error: Unknown NOS '$part'. Choose 'all', 'arista', 'cisco', 'juniper', or 'nokia'."
+            echo "Error: Unknown NOS '$part'. Choose 'all', 'arista', 'cisco', 'juniper', 'nokia', or 'none'."
             exit 1
             ;;
     esac

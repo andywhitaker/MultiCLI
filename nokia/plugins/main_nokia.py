@@ -8,23 +8,39 @@
 import os
 import sys
 
-# Dynamically locate base directory and add subdirectories to path
-potential_paths = [
-    os.path.expanduser('~/cli'),
-    '/etc/opt/srlinux/cli',
-    os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-]
-base_dir = None
-for p in potential_paths:
-    if os.path.exists(p):
-        base_dir = p
-        break
+import srlinux.mgmt.cli.plugins.reports as _srl_reports
 
-if base_dir:
-    for sub in ['system', 'interface', 'routing', 'service', 'bgp', 'evpn']:
-        sp = os.path.join(base_dir, sub)
-        if os.path.exists(sp) and sp not in sys.path:
-            sys.path.insert(0, sp)
+# Dynamically locate base directory and add subdirectories to path
+_reports_dir = os.path.dirname(os.path.abspath(_srl_reports.__file__))
+potential_paths = [
+    '/etc/opt/srlinux/cli',
+    os.path.expanduser('~/cli'),
+    '/home/nokuser/cli',
+    '/home/srosuser/cli',
+    '/home/auser/cli',
+    '/home/admin/cli',
+    '/home/srlinux/cli',
+    _reports_dir,
+]
+if globals().get('__file__'):
+    cand = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    potential_paths.insert(0, cand)
+
+if _reports_dir not in sys.path:
+    sys.path.insert(0, _reports_dir)
+
+for p in potential_paths:
+    if os.path.exists(p) and (
+        os.path.exists(os.path.join(p, 'system', 'sros_system_reports.py')) or
+        os.path.exists(os.path.join(p, 'sros_system_reports.py'))
+    ):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+        for sub in ['system', 'interface', 'routing', 'service', 'bgp', 'evpn']:
+            sp = os.path.join(p, sub)
+            if os.path.exists(sp) and sp not in sys.path:
+                sys.path.insert(0, sp)
+        break
 
 from srlinux.location import build_path
 from srlinux.mgmt.cli import CliPlugin, KeyCompleter
@@ -44,23 +60,56 @@ def _enter_submode(state, arguments):
         state.location = arguments
 
 def should_register_show_mode(persona_name):
+    aliases = {
+        'arista': ('arista', 'eos', 'all'),
+        'cisco': ('cisco', 'cisco-nx', 'ciscx', 'nxos', 'all'),
+        'juniper': ('juniper', 'junos', 'all'),
+        'nokia': ('nokia', 'sros', 'sr-os', 'all'),
+    }
+    valid_prefs = aliases.get(persona_name, (persona_name, persona_name.replace('-', ''), 'all'))
+    target_plugin = f'main_{persona_name.split("-")[0]}.py'
+
+    user_cli = os.path.expanduser('~/cli')
+    if os.path.abspath(user_cli) != '/etc/opt/srlinux/cli':
+        user_cfg = os.path.join(user_cli, 'default_persona')
+        if os.path.exists(user_cfg):
+            try:
+                with open(user_cfg) as f:
+                    pref = f.read().strip().lower()
+                    if pref:
+                        if pref == 'none':
+                            return False
+                        return pref in valid_prefs
+            except Exception:
+                pass
+        user_plugins_dir = os.path.join(user_cli, 'plugins')
+        if os.path.exists(user_plugins_dir):
+            try:
+                user_plugins = [f for f in os.listdir(user_plugins_dir) if f.startswith('main_') and f.endswith('.py')]
+                if user_plugins:
+                    return len(user_plugins) == 1 and target_plugin in user_plugins
+            except Exception:
+                pass
+
     config_file = '/etc/opt/srlinux/cli/default_persona'
     if os.path.exists(config_file):
         try:
             with open(config_file) as f:
                 pref = f.read().strip().lower()
-                if pref == 'none':
-                    return False
-                if pref in [persona_name, persona_name.replace('-', ''), 'sros', 'all']:
-                    return True
-                return False
+                if pref:
+                    if pref == 'none':
+                        return False
+                    return pref in valid_prefs
         except Exception:
             pass
     plugins_dir = '/etc/opt/srlinux/cli/plugins'
     if os.path.exists(plugins_dir):
-        installed_plugins = [f for f in os.listdir(plugins_dir) if f.startswith('main_') and f.endswith('.py')]
-        if len(installed_plugins) == 1 and f'main_{persona_name.split("-")[0]}.py' in installed_plugins[0]:
-            return True
+        try:
+            installed_plugins = [f for f in os.listdir(plugins_dir) if f.startswith('main_') and f.endswith('.py')]
+            if len(installed_plugins) == 1 and target_plugin in installed_plugins:
+                return True
+        except Exception:
+            pass
     return False
 
 class Plugin(CliPlugin):
@@ -142,9 +191,11 @@ class Plugin(CliPlugin):
             update_location=False
         )
 
+        lag_syntax = Syntax('lag', help='Show LAG information in Nokia SR OS format')
+        lag_syntax.add_unnamed_argument('name', default='lag*', help='LAG ID')
         self._add_or_override(
             target,
-            Syntax('lag', help='Show LAG information in Nokia SR OS format'),
+            lag_syntax,
             callback=self._print_lag,
             update_location=False
         )
@@ -275,6 +326,8 @@ class Plugin(CliPlugin):
         vxlan_cmd = self._add_or_override(
             service_id,
             Syntax('vxlan', help='VxLAN commands'),
+            callback=self._print_evpn_vxlan,
+            schema=EvpnDestinationReport().get_schema(),
             update_location=False
         )
         self._add_or_override(
@@ -289,10 +342,16 @@ class Plugin(CliPlugin):
         self._cli = cli
         # 1. Root global command 'sros' for interactive submode and one-liners:
         # e.g., 'sros show version' or entering 'sros' mode
-        sros_node = cli.add_global_command(
-            Syntax('sros', help='Nokia SR OS operational mode and commands'),
-            update_location=_enter_submode
-        )
+        try:
+            if hasattr(cli, 'running_mode') and cli.running_mode.has_global_command('sros'):
+                sros_node = cli.get_global_command('sros')
+            else:
+                sros_node = cli.add_global_command(
+                    Syntax('sros', help='Nokia SR OS operational mode and commands'),
+                    update_location=_enter_submode
+                )
+        except Exception:
+            sros_node = cli.get_global_command('sros')
         sros_show = self._add_or_override(
             sros_node,
             Syntax('show', help='Nokia SR OS show reports'),
@@ -301,7 +360,25 @@ class Plugin(CliPlugin):
         self._register_all_commands(sros_show)
 
     def on_start(self, state):
+        if os.getuid() != 0:
+            try:
+                aaa_client = getattr(state, '_aaa_client', None)
+                if aaa_client and not getattr(aaa_client, '_last_authentication_method', None):
+                    aaa_client._last_authentication_method = 'local'
+                    if getattr(aaa_client, '_session', None):
+                        aaa_client._session.close()
+                    new_sess = aaa_client._open_session()
+                    if new_sess:
+                        aaa_client._session = new_sess
+            except Exception:
+                pass
         if not should_register_show_mode('nokia'):
+            if os.getuid() != 0:
+                try:
+                    from srlinux.mgmt.cli.lazy_loader_utils import wait_for_user_plugins_load
+                    wait_for_user_plugins_load(state)
+                except Exception:
+                    pass
             return
         wait_for_show_reports_load(state)
         self._register_all_commands(state.command_tree.show_mode)
@@ -332,8 +409,17 @@ class Plugin(CliPlugin):
     def _print_port_description(self, state, output, **_kwargs):
         SrosInterfaceReports().show_port_description(state, output)
 
-    def _print_lag(self, state, output, **_kwargs):
-        SrosInterfaceReports().show_lag(state, output)
+    def _print_lag(self, state, output, arguments=None, **_kwargs):
+        if not state.is_last_command:
+            return
+        lag_id = None
+        if arguments and arguments.has_node('lag'):
+            lag_id = arguments.get_value_or('lag', 'name', None)
+            if not lag_id or lag_id in ('*', 'lag*'):
+                lag_id = arguments.get_value_or('lag', 'lag_id', None)
+            if lag_id in ('*', 'lag*'):
+                lag_id = None
+        SrosInterfaceReports().show_lag(state, output, lag_id=lag_id)
 
     def _print_route_table(self, state, output, arguments=None, **_kwargs):
         netinst = 'default'

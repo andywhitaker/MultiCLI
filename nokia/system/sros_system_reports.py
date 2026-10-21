@@ -10,6 +10,18 @@ import platform
 from srlinux.location import build_path
 from srlinux.schema.data_store import DataStore
 
+
+def _safe_get(node, attr, default=None):
+    """Safely read an attribute from an SR Linux Data object without raising DataError."""
+    if node is None:
+        return default
+    try:
+        val = getattr(node, attr)
+        return val if val is not None else default
+    except Exception:
+        return default
+
+
 class SrosSystemReports:
     """Handles classic Nokia SR OS system show reports."""
 
@@ -20,8 +32,9 @@ class SrosSystemReports:
         try:
             ch_data = state.server.get_data_store(DataStore.State).get_data(chassis_path, recursive=True)
             ch = ch_data.platform.get().chassis.get()
-            if hasattr(ch, 'type') and ch.type:
-                chassis_type = str(ch.type)
+            ct = _safe_get(ch, 'type')
+            if ct:
+                chassis_type = str(ct)
         except Exception:
             pass
 
@@ -31,14 +44,30 @@ class SrosSystemReports:
         try:
             sys_data = state.server.get_data_store(DataStore.State).get_data(sys_info_path, recursive=True)
             info = sys_data.system.get().information.get()
-            if hasattr(info, 'version') and info.version:
-                sw_version = str(info.version).lstrip('v')
-            if hasattr(info, 'last_booted') and info.last_booted:
-                last_booted = str(info.last_booted)
+            ver = _safe_get(info, 'version')
+            if ver:
+                sw_version = str(ver).lstrip('v')
+            lb = _safe_get(info, 'last_booted')
+            if lb:
+                last_booted = str(lb)
         except Exception:
             pass
 
-        arch = platform.machine() or "x86_64"
+        arch = "x86_64"
+        try:
+            ctrl_data = state.server.get_data_store(DataStore.State).get_data(build_path('/platform/control[slot=*]'), recursive=True)
+            for c in ctrl_data.platform.get().control.items():
+                cpu_list = _safe_get(c, 'cpu')
+                if cpu_list is not None:
+                    for cpu_obj in cpu_list.items():
+                        cpu_arch = _safe_get(cpu_obj, 'architecture')
+                        if cpu_arch:
+                            arch = str(cpu_arch)
+                            break
+                break
+        except Exception:
+            arch = platform.machine() or "x86_64"
+
         output.print_line("=" * 79)
         output.print_line(f"SRLinux-{sw_version} both/{arch} Nokia {chassis_type} Copyright (c) 2000-2026 Nokia.")
         output.print_line("All rights reserved. All use subject to applicable license agreements.")
@@ -53,8 +82,9 @@ class SrosSystemReports:
         try:
             name_data = state.server.get_data_store(DataStore.State).get_data(name_path, recursive=True)
             n_node = name_data.system.get().name.get()
-            if hasattr(n_node, 'host_name') and n_node.host_name:
-                hostname = str(n_node.host_name)
+            hn = _safe_get(n_node, 'host_name')
+            if hn:
+                hostname = str(hn)
         except Exception:
             pass
 
@@ -62,27 +92,32 @@ class SrosSystemReports:
         contact = ""
         location = ""
         coordinates = ""
+        now_dt = datetime.datetime.now(datetime.timezone.utc)
         sys_info_path = build_path('/system/information')
         try:
             sys_data = state.server.get_data_store(DataStore.State).get_data(sys_info_path, recursive=True)
             info = sys_data.system.get().information.get()
-            if hasattr(info, 'contact') and info.contact:
-                contact = str(info.contact)
-            if hasattr(info, 'location') and info.location:
-                location = str(info.location)
-            if hasattr(info, 'coordinates') and info.coordinates:
-                coordinates = str(info.coordinates)
-            if hasattr(info, 'up_time_counter') and info.up_time_counter:
-                uptime_seconds = int(info.up_time_counter) // 1_000_000_000
-            elif hasattr(info, 'last_booted') and info.last_booted:
-                boot_str = str(info.last_booted).split('(')[0].strip()
+            contact = str(_safe_get(info, 'contact', '') or '')
+            location = str(_safe_get(info, 'location', '') or '')
+            coordinates = str(_safe_get(info, 'coordinates', '') or '')
+            curr_dt = _safe_get(info, 'current_datetime')
+            if curr_dt:
+                c_str = str(curr_dt).split('(')[0].strip()
+                if 'Z' in c_str:
+                    c_str = c_str.replace('Z', '+00:00')
+                c_dt = datetime.datetime.fromisoformat(c_str)
+                if c_dt.tzinfo is None:
+                    c_dt = c_dt.replace(tzinfo=datetime.timezone.utc)
+                now_dt = c_dt
+            lb = _safe_get(info, 'last_booted')
+            if lb:
+                boot_str = str(lb).split('(')[0].strip()
                 if 'Z' in boot_str:
                     boot_str = boot_str.replace('Z', '+00:00')
                 boot_time = datetime.datetime.fromisoformat(boot_str)
-                now = datetime.datetime.now(datetime.timezone.utc)
                 if boot_time.tzinfo is None:
                     boot_time = boot_time.replace(tzinfo=datetime.timezone.utc)
-                uptime_seconds = int((now - boot_time).total_seconds())
+                uptime_seconds = max(0, int((now_dt - boot_time).total_seconds()))
         except Exception:
             pass
 
@@ -102,15 +137,16 @@ class SrosSystemReports:
         minutes, seconds = divmod(rem, 60)
         uptime_str = f"{days} days, {hours:02d}:{minutes:02d}:{seconds:02d}.00 (hr:min:sec)"
 
-        current_time_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y/%m/%d %H:%M:%S UTC")
+        tz_str = "UTC"
         clock_path = build_path('/system/clock')
         try:
             clk_data = state.server.get_data_store(DataStore.State).get_data(clock_path, recursive=True)
             clk = clk_data.system.get().clock.get()
-            if hasattr(clk, 'current_time') and clk.current_time:
-                current_time_str = str(clk.current_time)
+            if hasattr(clk, 'timezone') and clk.timezone:
+                tz_str = str(clk.timezone)
         except Exception:
             pass
+        current_time_str = now_dt.strftime(f"%Y/%m/%d %H:%M:%S {tz_str}")
 
         # Dynamically query SSH server state
         ssh_status = "Disabled"
@@ -164,8 +200,9 @@ class SrosSystemReports:
         try:
             name_data = state.server.get_data_store(DataStore.State).get_data(name_path, recursive=True)
             n_node = name_data.system.get().name.get()
-            if hasattr(n_node, 'host_name') and n_node.host_name:
-                hostname = str(n_node.host_name)
+            hn = _safe_get(n_node, 'host_name')
+            if hn:
+                hostname = str(hn)
         except Exception:
             pass
 
@@ -177,14 +214,18 @@ class SrosSystemReports:
         try:
             ch_data = state.server.get_data_store(DataStore.State).get_data(chassis_path, recursive=True)
             ch = ch_data.platform.get().chassis.get()
-            if hasattr(ch, 'type') and ch.type:
-                chassis_type = str(ch.type)
-            if hasattr(ch, 'serial_number') and ch.serial_number:
-                serial = str(ch.serial_number)
-            if hasattr(ch, 'clei_code') and ch.clei_code:
-                clei = str(ch.clei_code)
-            if hasattr(ch, 'oper_state') and ch.oper_state:
-                oper_state = str(ch.oper_state)
+            ct = _safe_get(ch, 'type')
+            if ct:
+                chassis_type = str(ct)
+            sn = _safe_get(ch, 'serial_number')
+            if sn:
+                serial = str(sn)
+            cl = _safe_get(ch, 'clei_code')
+            if cl:
+                clei = str(cl)
+            op = _safe_get(ch, 'oper_state')
+            if op:
+                oper_state = str(op)
         except Exception:
             pass
 
@@ -194,10 +235,12 @@ class SrosSystemReports:
             sys_info_path = build_path('/system/information')
             sys_data = state.server.get_data_store(DataStore.State).get_data(sys_info_path, recursive=True)
             info = sys_data.system.get().information.get()
-            if hasattr(info, 'location') and info.location:
-                location = str(info.location)
-            if hasattr(info, 'coordinates') and info.coordinates:
-                coordinates = str(info.coordinates)
+            loc = _safe_get(info, 'location')
+            if loc:
+                location = str(loc)
+            coord = _safe_get(info, 'coordinates')
+            if coord:
+                coordinates = str(coord)
         except Exception:
             pass
 

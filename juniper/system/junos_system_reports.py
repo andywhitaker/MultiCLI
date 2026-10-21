@@ -8,6 +8,18 @@ import datetime
 from srlinux.location import build_path
 from srlinux.schema.data_store import DataStore
 
+
+def _safe_get(node, attr, default=None):
+    """Safely read an attribute from an SR Linux Data object without raising DataError."""
+    if node is None:
+        return default
+    try:
+        val = getattr(node, attr)
+        return val if val is not None else default
+    except Exception:
+        return default
+
+
 class JunosSystemReports:
     """Handles Juniper JUNOS system show commands."""
 
@@ -65,7 +77,7 @@ class JunosSystemReports:
     def show_system_uptime(self, state, output):
         """Display Juniper JUNOS style 'show system uptime'."""
         now = datetime.datetime.now(datetime.timezone.utc)
-        curr_time_str = now.strftime("%Y-%m-%d %H:%M:%S UTC")
+        tz_str = "UTC"
 
         last_booted = ""
         uptime_seconds = 0
@@ -73,12 +85,31 @@ class JunosSystemReports:
         try:
             sys_data = state.server.get_data_store(DataStore.State).get_data(sys_info_path, recursive=True)
             info = sys_data.system.get().information.get()
-            if hasattr(info, 'last_booted') and info.last_booted:
-                last_booted = str(info.last_booted)
-            if hasattr(info, 'up_time_counter') and info.up_time_counter:
-                uptime_seconds = int(info.up_time_counter) // 1_000_000_000
+            curr_dt = _safe_get(info, 'current_datetime')
+            if curr_dt:
+                c_str = str(curr_dt).split('(')[0].strip()
+                if 'Z' in c_str:
+                    c_str = c_str.replace('Z', '+00:00')
+                c_dt = datetime.datetime.fromisoformat(c_str)
+                if c_dt.tzinfo is None:
+                    c_dt = c_dt.replace(tzinfo=datetime.timezone.utc)
+                now = c_dt
+            lb = _safe_get(info, 'last_booted')
+            if lb:
+                last_booted = str(lb)
         except Exception:
             pass
+
+        try:
+            clk_data = state.server.get_data_store(DataStore.State).get_data(build_path('/system/clock'), recursive=True)
+            clk = clk_data.system.get().clock.get()
+            tz = _safe_get(clk, 'timezone')
+            if tz:
+                tz_str = str(tz)
+        except Exception:
+            pass
+
+        curr_time_str = now.strftime(f"%Y-%m-%d %H:%M:%S {tz_str}")
 
         if uptime_seconds == 0 and last_booted:
             try:
@@ -106,7 +137,7 @@ class JunosSystemReports:
             ntp_path = build_path('/system/ntp')
             ntp_data = state.server.get_data_store(DataStore.State).get_data(ntp_path, recursive=True)
             ntp_node = ntp_data.system.get().ntp.get()
-            sync_st = getattr(ntp_node, 'synchronization_state', None)
+            sync_st = _safe_get(ntp_node, 'synchronization_state')
             if sync_st and str(sync_st).lower() in ('synchronized', 'sync'):
                 time_source = "NTP CLOCK"
         except Exception:
@@ -119,10 +150,11 @@ class JunosSystemReports:
             cfg_data = state.server.get_data_store(DataStore.State).get_data(cfg_path, recursive=True)
             cfg_node = cfg_data.system.get().configuration.get()
             commits = []
-            if hasattr(cfg_node, 'commit'):
-                for c in cfg_node.commit.items():
-                    c_end = getattr(c, 'ended', None) or getattr(c, 'started', None)
-                    c_user = getattr(c, 'username', '') or ''
+            commit_list = _safe_get(cfg_node, 'commit')
+            if commit_list is not None:
+                for c in commit_list.items():
+                    c_end = _safe_get(c, 'ended') or _safe_get(c, 'started')
+                    c_user = _safe_get(c, 'username', '') or ''
                     if c_end:
                         commits.append((c_end, c_user))
             if commits:
@@ -170,8 +202,8 @@ class JunosSystemReports:
         try:
             data = state.server.get_data_store(DataStore.State).get_data(path_chassis, recursive=True)
             ch = data.platform.get().chassis.get()
-            ch_type = getattr(ch, 'type', '-') or '-'
-            serial = getattr(ch, 'serial_number', '-') or '-'
+            ch_type = _safe_get(ch, 'type', '-') or '-'
+            serial = _safe_get(ch, 'serial_number', '-') or '-'
         except Exception:
             pass
 
@@ -182,10 +214,10 @@ class JunosSystemReports:
         try:
             data_ctrl = state.server.get_data_store(DataStore.State).get_data(path_ctrl, recursive=True)
             for c in data_ctrl.platform.get().control.items():
-                slot = getattr(c, 'slot', 'A')
-                c_type = getattr(c, 'type', 'Control Module') or f"Control Card {slot}"
-                c_sn = getattr(c, 'serial_number', '-') or '-'
-                c_part = getattr(c, 'part_number', '-') or '-'
+                slot = _safe_get(c, 'slot', 'A')
+                c_type = _safe_get(c, 'type', 'Control Module') or f"Control Card {slot}"
+                c_sn = _safe_get(c, 'serial_number', '-') or '-'
+                c_part = _safe_get(c, 'part_number', '-') or '-'
                 lines.append(f"{f'Control Card {slot}':<16} {'':<8} {c_part:<12} {c_sn:<17} {c_type}")
         except Exception:
             pass
@@ -196,8 +228,8 @@ class JunosSystemReports:
             data = state.server.get_data_store(DataStore.State).get_data(path_psu, recursive=True)
             for psu in data.platform.get().power_supply.items():
                 p_id = psu.id
-                oper = getattr(psu, 'oper_state', '-')
-                p_sn = getattr(psu, 'serial_number', None)
+                oper = _safe_get(psu, 'oper_state', '-')
+                p_sn = _safe_get(psu, 'serial_number')
                 if oper != 'empty' and p_sn:
                     lines.append(f"{f'Power Supply {p_id}':<16} {'':<8} {'-':<12} {p_sn:<17} {'Power Supply'}")
         except Exception:
@@ -209,8 +241,8 @@ class JunosSystemReports:
             data = state.server.get_data_store(DataStore.State).get_data(path_fan, recursive=True)
             for fan in data.platform.get().fan_tray.items():
                 f_id = fan.id
-                oper = getattr(fan, 'oper_state', '-')
-                f_sn = getattr(fan, 'serial_number', None)
+                oper = _safe_get(fan, 'oper_state', '-')
+                f_sn = _safe_get(fan, 'serial_number')
                 if oper != 'empty' and f_sn:
                     lines.append(f"{f'Fan Tray {f_id}':<16} {'':<8} {'-':<12} {f_sn:<17} {'Fan Tray'}")
         except Exception:
@@ -221,113 +253,144 @@ class JunosSystemReports:
         output.print_line("Try SR Linux command: show platform chassis")
 
     def show_system_processes(self, state, output, summary=False):
-        """Display Juniper JUNOS style 'show system processes [summary|extensive]'."""
+        """Display Juniper JUNOS style 'show system processes [summary|extensive]' using SR Linux State datastore."""
         lines = []
-        now_time = datetime.datetime.now().strftime("%H:%M:%S")
-
-        # Last pid
-        last_pid = "0"
-        try:
-            with open('/proc/sys/kernel/ns_last_pid') as f:
-                last_pid = f.read().strip()
-        except Exception:
-            pass
-
-        # Load averages
-        load1, load5, load15 = "0.00", "0.00", "0.00"
-        try:
-            with open('/proc/loadavg') as f:
-                parts = f.read().split()
-                load1, load5, load15 = parts[0], parts[1], parts[2]
-        except Exception:
-            pass
-
-        # Uptime
+        now_dt = datetime.datetime.now(datetime.timezone.utc)
         up_str = "--"
         try:
-            with open('/proc/uptime') as f:
-                up_secs = float(f.read().split()[0])
-                days = int(up_secs // 86400)
-                hours = int((up_secs % 86400) // 3600)
-                mins = int((up_secs % 3600) // 60)
-                secs = int(up_secs % 60)
-                up_str = f"{days}+{hours:02d}:{mins:02d}:{secs:02d}"
+            sys_data = state.server.get_data_store(DataStore.State).get_data(build_path('/system/information'), recursive=True)
+            info = sys_data.system.get().information.get()
+            curr_dt = _safe_get(info, 'current_datetime')
+            if curr_dt:
+                c_str = str(curr_dt).split('(')[0].strip()
+                if 'Z' in c_str:
+                    c_str = c_str.replace('Z', '+00:00')
+                c_dt = datetime.datetime.fromisoformat(c_str)
+                if c_dt.tzinfo is None:
+                    c_dt = c_dt.replace(tzinfo=datetime.timezone.utc)
+                now_dt = c_dt
+            up_secs = 0
+            lb = _safe_get(info, 'last_booted')
+            if lb:
+                b_str = str(lb).split('(')[0].strip()
+                if 'Z' in b_str:
+                    b_str = b_str.replace('Z', '+00:00')
+                b_dt = datetime.datetime.fromisoformat(b_str)
+                if b_dt.tzinfo is None:
+                    b_dt = b_dt.replace(tzinfo=datetime.timezone.utc)
+                up_secs = max(0, int((now_dt - b_dt).total_seconds()))
+            days = int(up_secs // 86400)
+            hours = int((up_secs % 86400) // 3600)
+            mins = int((up_secs % 3600) // 60)
+            secs = int(up_secs % 60)
+            up_str = f"{days}+{hours:02d}:{mins:02d}:{secs:02d}"
         except Exception:
             pass
 
-        # Memory & Swap
-        mem_total, mem_free, buffers, cached = "0", "0", "0", "0"
-        active_kb, inact_kb, swap_total, swap_free = "0", "0", "0", "0"
-        try:
-            with open('/proc/meminfo') as f:
-                for line in f:
-                    if line.startswith('MemTotal:'):
-                        mem_total = line.split()[1]
-                    elif line.startswith('MemFree:'):
-                        mem_free = line.split()[1]
-                    elif line.startswith('Active:'):
-                        active_kb = line.split()[1]
-                    elif line.startswith('Inactive:'):
-                        inact_kb = line.split()[1]
-                    elif line.startswith('Buffers:'):
-                        buffers = line.split()[1]
-                    elif line.startswith('Cached:'):
-                        cached = line.split()[1]
-                    elif line.startswith('SwapTotal:'):
-                        swap_total = line.split()[1]
-                    elif line.startswith('SwapFree:'):
-                        swap_free = line.split()[1]
-        except Exception:
-            pass
-
-        mem_tot_m = int(mem_total) // 1024 if mem_total.isdigit() else 0
-        mem_free_m = int(mem_free) // 1024 if mem_free.isdigit() else 0
-        active_m = int(active_kb) // 1024 if active_kb.isdigit() else 0
-        inact_m = int(inact_kb) // 1024 if inact_kb.isdigit() else 0
-        wired_m = (int(buffers) + int(cached)) // 1024 if buffers.isdigit() and cached.isdigit() else 0
-        swap_tot_m = int(swap_total) // 1024 if swap_total.isdigit() else 0
-        swap_free_m = int(swap_free) // 1024 if swap_free.isdigit() else 0
-
-        # Processes
+        now_time = now_dt.strftime("%H:%M:%S")
+        last_pid = "0"
+        load1, load5, load15 = "0.00", "0.00", "0.00"
+        cpu_line = "CPU:  0.0% user,  0.0% nice,  0.0% system,  0.0% interrupt, 100.0% idle"
+        active_m, inact_m, wired_m, mem_free_m = 0, 0, 0, 0
+        swap_tot_m, swap_free_m = 0, 0
         ps_rows = []
+
         try:
-            import subprocess
-            ps_out = subprocess.run(["ps", "-eo", "pid,user,pri,ni,vsz,rss,stat,time,%cpu,comm", "--sort=-%cpu"],
-                                    stdout=subprocess.PIPE, text=True).stdout
-            for p_line in ps_out.strip().split("\n")[1:]:
-                fields = p_line.split(None, 9)
-                if len(fields) == 10:
-                    ps_rows.append(fields)
+            ctrl_data = state.server.get_data_store(DataStore.State).get_data(
+                build_path('/platform/control[slot=*]'), recursive=True
+            )
+            for c in ctrl_data.platform.get().control.items():
+                cpu_list = _safe_get(c, 'cpu')
+                if cpu_list is not None:
+                    for cpu_obj in cpu_list.items():
+                        idx = str(_safe_get(cpu_obj, 'index', ''))
+                        if idx == 'all':
+                            tot_container = _safe_get(cpu_obj, 'total')
+                            if tot_container is not None and tot_container.exists():
+                                tot = tot_container.get()
+                                a1 = float(_safe_get(tot, 'average_1', 0) or 0)
+                                a5 = float(_safe_get(tot, 'average_5', 0) or 0)
+                                a15 = float(_safe_get(tot, 'average_15', 0) or 0)
+                                load1 = f"{a1 / 100.0:.2f}"
+                                load5 = f"{a5 / 100.0:.2f}"
+                                load15 = f"{a15 / 100.0:.2f}"
+
+                            def _inst(attr_name, default_val=0.0):
+                                sub = _safe_get(cpu_obj, attr_name)
+                                if sub is not None and sub.exists():
+                                    return float(_safe_get(sub.get(), 'instant', default_val) or default_val)
+                                return default_val
+
+                            us = _inst('user', 0.0)
+                            ni = _inst('nice', 0.0)
+                            sy = _inst('system', 0.0)
+                            idl = _inst('idle', 100.0)
+                            intr = _inst('hardware_interrupt', 0.0) + _inst('software_interrupt', 0.0)
+                            cpu_line = f"CPU:  {us:4.1f}% user,  {ni:4.1f}% nice,  {sy:4.1f}% system,  {intr:4.1f}% interrupt, {idl:4.1f}% idle"
+                            break
+
+                mem_container = _safe_get(c, 'memory')
+                if mem_container is not None and mem_container.exists():
+                    mem = mem_container.get()
+                    phys = int(_safe_get(mem, 'physical', 0) or 0)
+                    free_b = int(_safe_get(mem, 'free', 0) or 0)
+                    res_b = int(_safe_get(mem, 'reserved', 0) or 0)
+                    tot_m = phys // (1024 * 1024)
+                    mem_free_m = free_b // (1024 * 1024)
+                    active_m = res_b // (1024 * 1024) if res_b > 0 else max(0, tot_m - mem_free_m)
+                    inact_m = 0
+                    wired_m = max(0, tot_m - active_m - mem_free_m)
+
+                proc_list = _safe_get(c, 'process')
+                if proc_list is not None:
+                    for p in proc_list.items():
+                        pid = int(_safe_get(p, 'pid', 0) or 0)
+                        comm = str(_safe_get(p, 'name', '') or _safe_get(p, 'args', '') or 'unknown')
+                        cpu_val = float(_safe_get(p, 'cpu_utilization', 0) or 0)
+                        mem_bytes = int(_safe_get(p, 'memory_usage', 0) or 0)
+                        rss_kb = mem_bytes // 1024
+                        vsz_kb = rss_kb
+                        s_raw = _safe_get(p, 'start_time')
+                        elapsed = 0.0
+                        if s_raw:
+                            try:
+                                st_str = str(s_raw).split('(')[0].strip().replace('Z', '+00:00')
+                                st_dt = datetime.datetime.fromisoformat(st_str)
+                                if st_dt.tzinfo is None:
+                                    st_dt = st_dt.replace(tzinfo=datetime.timezone.utc)
+                                elapsed = max(0.0, (now_dt - st_dt).total_seconds())
+                            except Exception:
+                                pass
+                        cpu_secs = int(elapsed * (cpu_val / 100.0))
+                        tm_str = f"{cpu_secs // 60}:{cpu_secs % 60:02d}"
+                        s_name = "run" if cpu_val > 0 else "select"
+                        ps_rows.append({
+                            'pid': pid,
+                            'user': 'root',
+                            'thr': '1',
+                            'pri': '20',
+                            'ni': '0',
+                            'vsz': vsz_kb,
+                            'rss': rss_kb,
+                            'state': s_name,
+                            'time': tm_str,
+                            'cpu': cpu_val,
+                            'comm': comm,
+                        })
+                break
         except Exception:
             pass
 
-        if last_pid == "0" and ps_rows:
-            try:
-                last_pid = str(max(int(p[0]) for p in ps_rows if p[0].isdigit()))
-            except Exception:
-                pass
+        if ps_rows:
+            last_pid = str(max(p['pid'] for p in ps_rows))
+
+        ps_rows.sort(key=lambda r: (-r['cpu'], -r['rss'], r['pid']))
 
         total_procs = len(ps_rows)
-        running = sum(1 for p in ps_rows if p[6].startswith('R'))
-        sleeping = sum(1 for p in ps_rows if p[6].startswith('S') or p[6].startswith('D'))
-
-        # CPU from /proc/stat
-        cpu_line = "CPU:  0.0% user,  0.0% nice,  0.0% system,  0.0% interrupt, 100.0% idle"
-        try:
-            with open('/proc/stat') as f:
-                first = f.readline()
-                if first.startswith('cpu '):
-                    c_parts = [float(x) for x in first.split()[1:]]
-                    tot = sum(c_parts)
-                    if tot > 0:
-                        us = (c_parts[0] / tot) * 100
-                        ni = (c_parts[1] / tot) * 100
-                        sy = (c_parts[2] / tot) * 100
-                        idl = (c_parts[3] / tot) * 100
-                        intr = (c_parts[5] / tot) * 100 if len(c_parts) > 5 else 0.0
-                        cpu_line = f"CPU:  {us:4.1f}% user,  {ni:4.1f}% nice,  {sy:4.1f}% system,  {intr:4.1f}% interrupt, {idl:4.1f}% idle"
-        except Exception:
-            pass
+        running = sum(1 for p in ps_rows if p['state'] == 'run')
+        if total_procs > 0 and running == 0:
+            running = 1
+        sleeping = max(0, total_procs - running)
 
         lines.append(f"last pid: {last_pid:>6};  load averages:  {load1},  {load5},  {load15}  up {up_str}    {now_time}")
         lines.append(f"{total_procs} processes: {running} running, {sleeping} sleeping")
@@ -339,21 +402,12 @@ class JunosSystemReports:
             lines.append("")
             lines.append(f"{'PID':>6} {'USERNAME':<10} {'THR':<4} {'PRI':<4} {'NICE':<5} {'SIZE':>8} {'RES':>7} {'STATE':<8} {'TIME':>8} {'WCPU':>6} {'COMMAND'}")
             for p in ps_rows[:25]:
-                pid, usr, pri, ni, vsz, rss, stat, tm, cpu, comm = p
-                size_k = f"{vsz}K"
-                res_k = f"{rss}K"
-                wcpu = f"{cpu}%"
-                thr = '1'
-                try:
-                    with open(f'/proc/{pid}/status') as sf:
-                        for s_line in sf:
-                            if s_line.startswith('Threads:'):
-                                thr = s_line.split(':', 1)[1].strip()
-                                break
-                except Exception:
-                    pass
-                s_name = "select" if stat.startswith('S') else ("run" if stat.startswith('R') else "stop")
-                lines.append(f"{pid:>6} {usr:<10} {thr:<4} {pri:<4} {ni:<5} {size_k:>8} {res_k:>7} {s_name:<8} {tm:>8} {wcpu:>6} {comm}")
+                size_k = f"{p['vsz']}K"
+                res_k = f"{p['rss']}K"
+                wcpu = f"{p['cpu']:.1f}%"
+                lines.append(
+                    f"{p['pid']:>6} {p['user']:<10} {p['thr']:<4} {p['pri']:<4} {p['ni']:<5} {size_k:>8} {res_k:>7} {p['state']:<8} {p['time']:>8} {wcpu:>6} {p['comm']}"
+                )
 
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")

@@ -18,7 +18,8 @@ MultiCLI allows users to execute familiar Cisco NX-OS commands on Nokia SR Linux
 ### Interfaces & Layer 2
 | Command | Description |
 |---|---|
-| `show interface brief` / `show interfaces brief` | Brief summary of physical, LAG, and subinterfaces |
+| `show interface [<name>]` | Detailed interface operational state and counters |
+| `show interface brief` | Brief summary of physical, LAG, and subinterfaces |
 | `show interface status` | Port status, speed, duplex, and type |
 | `show interface description` | Interface descriptions |
 | `show interface transceiver [details]` | Optical transceiver diagnostics and DDM |
