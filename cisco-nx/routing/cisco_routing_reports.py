@@ -619,3 +619,89 @@ class CiscoRoutingReports:
         output.print_line("\n".join(lines))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
         output.print_line("Try SR Linux command: show system network-instance ethernet-segments")
+
+    def show_mac_address_table(self, state, output, vlan_filter=None, interface_filter=None, vni_filter=None):
+        """Display Cisco NX-OS style 'show mac address-table' with normalized interface_filter."""
+        from cisco_interface_reports import _cisco_to_srl_intf
+
+        def _norm_intf(val):
+            if not val or val == '*':
+                return None
+            s = str(val).strip()
+            if s.endswith('(R)'):
+                s = s[:-3]
+            sub = None
+            if '.' in s and not s.lower().startswith('vlan'):
+                s, sub = s.split('.', 1)
+            base = _cisco_to_srl_intf(s)
+            if sub is not None and sub != '0':
+                return f"{base}.{sub}"
+            return base
+
+        norm_filter = _norm_intf(interface_filter) if interface_filter else None
+        lines = [
+            "Legend:",
+            "        * - primary entry, G - Gateway MAC, (R) - Routed MAC, O - Overlay MAC",
+            "        age - seconds since last seen,+ - primary entry using vPC Peer-Link,",
+            "        (T) - True, (F) - False, C - ControlPlane MAC, ~ - vsan,",
+            "        (NA)- Not Applicable A - ESI Active Path, S - ESI Standby Path",
+            "        TL - True Learned, PS - Peer Sync, RO - Re-originate",
+            "      VLAN      MAC Address        Type      age   Secure NTFY Ports                                         Instance",
+            "-------------+-------------------+--------+-------+------+----+---------------------------------------------+------------------------",
+        ]
+        vlan_by_ni = {}
+        ports_by_ni = {}
+        try:
+            intf_p = build_path('/network-instance[name=*]/interface[name=*]')
+            intf_data = state.server.get_data_store(DataStore.State).get_data(intf_p, recursive=False)
+            for ni in intf_data.network_instance.items():
+                if hasattr(ni, 'interface'):
+                    raw_ports = [intf.name for intf in ni.interface.items()]
+                    ports_by_ni[ni.name] = raw_ports
+                    vlan_by_ni[ni.name] = self._get_vlan_for_ni(state, raw_ports)
+        except Exception:
+            pass
+
+        path = build_path('/network-instance[name=*]/bridge-table/mac-table/mac[address=*]')
+        try:
+            data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True)
+            for ni in data.network_instance.items():
+                ni_name = ni.name
+                ni_vlan = vlan_by_ni.get(ni_name, "1")
+                bt = _safe_get(ni, 'bridge_table', None)
+                if not bt:
+                    continue
+                mt = _safe_get(bt.get(), 'mac_table', None)
+                if not mt:
+                    continue
+                for entry in mt.get().mac.items():
+                    mac_addr = _safe_get(entry, 'address', '')
+                    raw_type = str(_safe_get(entry, 'type', 'learnt'))
+                    flag = "G" if "irb" in raw_type else "*"
+                    m_type = "dynamic" if ("evpn" in raw_type or raw_type == "learnt") else "static"
+                    dest = str(_safe_get(entry, 'destination', ''))
+                    if 'irb' in dest:
+                        irbs = [p for p in ports_by_ni.get(ni_name, []) if 'irb' in p]
+                        port_str = f"{irbs[0]}(R)" if irbs else "irb0.0(R)"
+                    else:
+                        port_str = dest.split()[0] if dest else "--"
+
+                    if vlan_filter and str(vlan_filter) != str(ni_vlan):
+                        continue
+                    if vni_filter and f"vni:{vni_filter}" not in dest:
+                        continue
+                    if norm_filter:
+                        norm_port = _norm_intf(port_str)
+                        norm_port_base = norm_port.split('.', 1)[0] if norm_port else None
+                        if norm_filter != norm_port and ('.' in norm_filter or norm_filter != norm_port_base):
+                            continue
+                    lines.append(f"{flag:<1} {ni_vlan:>8} {mac_addr:^17} {m_type:<8} {'NA':<3} {'F':^6} {'F':>4} {port_str:<43} {ni_name:<30}")
+        except Exception:
+            pass
+
+        lines.extend([
+            "-------------------------------------------------------------------------------------------------------------------------------------",
+            "Try SR Linux command: show network-instance bridge-table mac-table all",
+            "Try SR Linux command: show interface brief"
+        ])
+        output.print_line("\n".join(lines))

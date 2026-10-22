@@ -126,6 +126,17 @@ class Plugin(CliPlugin):
             return parent.root.get_command_or_none(name)
         return None
 
+    def _default_container_help(self, state, output, arguments, **_kwargs):
+        if not state.is_last_command:
+            return
+        from srlinux.mgmt.cli.help_formatter import CommandHelpFormatter
+        children = arguments.node.get_filtered_commands(state)
+        help_text = CommandHelpFormatter(
+            arguments.node, children, output_width=output.screen_width,
+            state=state, help_detail=False, partial_word=''
+        ).format()
+        output.print(help_text + '\n')
+
     def _add_or_override(self, parent, syntax, callback=None, schema=None, update_location=False):
         node = self._get_child(parent, syntax.name)
         if node:
@@ -133,8 +144,7 @@ class Plugin(CliPlugin):
                 node.set_callback(callback)
             return node
         kwargs = {'update_location': update_location}
-        if callback is not None:
-            kwargs['callback'] = callback
+        kwargs['callback'] = callback if callback is not None else self._default_container_help
         if schema is not None:
             kwargs['schema'] = schema
         return parent.add_command(syntax, **kwargs)
@@ -369,8 +379,21 @@ class Plugin(CliPlugin):
         IpRouteReport()._show_routes(state, output, network_instance='default')
         output.print_line('\nTry SR Linux command: show network-instance default route-table ipv4-unicast summary')
 
+    def _extract_vrf_arg(self, state, arguments):
+        for src in (arguments, getattr(state, 'line_commands', None)):
+            if not src or not hasattr(src, 'has_node'):
+                continue
+            try:
+                if src.has_node('vrf'):
+                    val = src.get_value_or('vrf', 'vrf_name', 'default')
+                    if val:
+                        return val
+            except Exception:
+                pass
+        return 'default'
+
     def _print_ip_route_vrf(self, state, arguments, output, **_kwargs):
-        vrf_name = arguments.get('vrf_name') or 'default'
+        vrf_name = self._extract_vrf_arg(state, arguments)
         IpRouteReport()._show_routes(state, output, network_instance=vrf_name)
         output.print_line(f'\nTry SR Linux command: show network-instance {vrf_name} route-table ipv4-unicast summary')
 
@@ -382,7 +405,7 @@ class Plugin(CliPlugin):
         output.print_line('\nTry SR Linux command: show network-instance default protocols bgp neighbor')
 
     def _print_ip_bgp_vrf_summary(self, state, arguments, output, **_kwargs):
-        vrf_name = arguments.get('vrf', 'vrf_name') if arguments.has_node('vrf') else 'default'
+        vrf_name = self._extract_vrf_arg(state, arguments)
         IpBgpReport().show_bgp_summary(state, output, network_instance=vrf_name)
         output.print_line(f'\nTry SR Linux command: show network-instance {vrf_name} protocols bgp neighbor')
 

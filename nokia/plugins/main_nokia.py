@@ -120,6 +120,17 @@ class Plugin(CliPlugin):
             return parent.root.get_command_or_none(name)
         return None
 
+    def _default_container_help(self, state, output, arguments, **_kwargs):
+        if not state.is_last_command:
+            return
+        from srlinux.mgmt.cli.help_formatter import CommandHelpFormatter
+        children = arguments.node.get_filtered_commands(state)
+        help_text = CommandHelpFormatter(
+            arguments.node, children, output_width=output.screen_width,
+            state=state, help_detail=False, partial_word=''
+        ).format()
+        output.print(help_text + '\n')
+
     def _add_or_override(self, parent, syntax, callback=None, schema=None, update_location=False):
         node = self._get_child(parent, syntax.name)
         if node:
@@ -127,8 +138,7 @@ class Plugin(CliPlugin):
                 node.set_callback(callback)
             return node
         kwargs = {'update_location': update_location}
-        if callback is not None:
-            kwargs['callback'] = callback
+        kwargs['callback'] = callback if callback is not None else self._default_container_help
         if schema is not None:
             kwargs['schema'] = schema
         return parent.add_command(syntax, **kwargs)
@@ -396,14 +406,25 @@ class Plugin(CliPlugin):
     def _print_lldp_neighbor(self, state, output, **_kwargs):
         SrosInterfaceReports().show_lldp_neighbor(state, output)
 
+    def _extract_node_arg(self, state, arguments, node_name, arg_name, default=None):
+        for src in (arguments, getattr(state, 'line_commands', None)):
+            if not src or not hasattr(src, 'has_node'):
+                continue
+            try:
+                if src.has_node(node_name):
+                    val = src.get_value_or(node_name, arg_name, default)
+                    if val is not None and val != default:
+                        return val
+            except Exception:
+                pass
+        return default
+
     def _print_port(self, state, output, arguments=None, **_kwargs):
         if not state.is_last_command:
             return
-        port_id = None
-        if arguments and arguments.has_node('port'):
-            port_id = arguments.get_value_or('port', 'port_id', None)
-            if port_id == '*':
-                port_id = None
+        port_id = self._extract_node_arg(state, arguments, 'port', 'port_id', None)
+        if port_id == '*':
+            port_id = None
         SrosInterfaceReports().show_port(state, output, port_id=port_id)
 
     def _print_port_description(self, state, output, **_kwargs):
@@ -412,54 +433,40 @@ class Plugin(CliPlugin):
     def _print_lag(self, state, output, arguments=None, **_kwargs):
         if not state.is_last_command:
             return
-        lag_id = None
-        if arguments and arguments.has_node('lag'):
-            lag_id = arguments.get_value_or('lag', 'name', None)
-            if not lag_id or lag_id in ('*', 'lag*'):
-                lag_id = arguments.get_value_or('lag', 'lag_id', None)
-            if lag_id in ('*', 'lag*'):
-                lag_id = None
+        lag_id = self._extract_node_arg(state, arguments, 'lag', 'name', None)
+        if not lag_id or lag_id in ('*', 'lag*'):
+            lag_id = self._extract_node_arg(state, arguments, 'lag', 'lag_id', None)
+        if lag_id in ('*', 'lag*'):
+            lag_id = None
         SrosInterfaceReports().show_lag(state, output, lag_id=lag_id)
 
     def _print_route_table(self, state, output, arguments=None, **_kwargs):
-        netinst = 'default'
-        if arguments and arguments.has_node('router'):
-            netinst = arguments.get_value_or('router', 'netinst', 'default') or 'default'
+        netinst = self._extract_node_arg(state, arguments, 'router', 'netinst', 'default') or 'default'
         SrosRoutingReports().show_route_table(state, output, netinst=netinst)
 
     def _print_router_interface(self, state, output, arguments=None, **_kwargs):
-        netinst = 'default'
-        if arguments and arguments.has_node('router'):
-            netinst = arguments.get_value_or('router', 'netinst', 'default') or 'default'
+        netinst = self._extract_node_arg(state, arguments, 'router', 'netinst', 'default') or 'default'
         SrosRoutingReports().show_router_interface(state, output, netinst=netinst)
 
     def _print_router_arp(self, state, output, arguments=None, **_kwargs):
-        netinst = 'default'
-        if arguments and arguments.has_node('router'):
-            netinst = arguments.get_value_or('router', 'netinst', 'default') or 'default'
+        netinst = self._extract_node_arg(state, arguments, 'router', 'netinst', 'default') or 'default'
         SrosRoutingReports().show_router_arp(state, output, netinst=netinst)
 
     def _print_ospf_neighbor(self, state, output, arguments=None, **_kwargs):
-        netinst = 'default'
-        if arguments and arguments.has_node('router'):
-            netinst = arguments.get_value_or('router', 'netinst', 'default') or 'default'
+        netinst = self._extract_node_arg(state, arguments, 'router', 'netinst', 'default') or 'default'
         SrosRoutingReports().show_router_ospf_neighbor(state, output, netinst=netinst)
 
     def _print_isis_adjacency(self, state, output, arguments=None, **_kwargs):
-        netinst = 'default'
-        if arguments and arguments.has_node('router'):
-            netinst = arguments.get_value_or('router', 'netinst', 'default') or 'default'
+        netinst = self._extract_node_arg(state, arguments, 'router', 'netinst', 'default') or 'default'
         SrosRoutingReports().show_router_isis_adjacency(state, output, netinst=netinst)
 
     def _print_service_using(self, state, output, **_kwargs):
         SrosServiceReports().show_service_using(state, output)
 
     def _print_service_fdb_mac(self, state, output, arguments=None, **_kwargs):
-        service_name = None
-        if arguments and arguments.has_node('id'):
-            service_name = arguments.get_value_or('id', 'name', None)
-            if service_name == '*':
-                service_name = None
+        service_name = self._extract_node_arg(state, arguments, 'id', 'name', None)
+        if service_name == '*':
+            service_name = None
         SrosServiceReports().show_service_fdb_mac(state, output, service_name=service_name)
 
     def _print_evpn_mpls(self, state, arguments, output, **_kwargs):

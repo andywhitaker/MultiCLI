@@ -25,6 +25,8 @@ except ImportError:
         if not name:
             return ""
         name = str(name)
+        if name.startswith('irb'):
+            return name
         if name.endswith('.0'):
             name = name[:-2]
         if name.startswith('ethernet-'):
@@ -42,7 +44,37 @@ except ImportError:
         return name
 
 
+def _arista_to_srl_intf(name):
+    if not name or name == '*':
+        return '*'
+    import re
+    s = str(name).strip()
+    if '.' in s and not s.lower().startswith('vlan'):
+        s = s.split('.', 1)[0]
+    low = s.lower()
+    m = re.match(r'^et(?:h(?:ernet)?)?[-_]?(\d+/\d+(?:/\d+)?)$', low)
+    if m:
+        return f"ethernet-{m.group(1)}"
+    m = re.match(r'^po(?:rt-channel)?[-_]?(\d+)$', low)
+    if m:
+        return f"lag{m.group(1)}"
+    m = re.match(r'^(?:ma(?:nagement)?|mgmt)[-_]?(\d+)$', low)
+    if m:
+        return "mgmt0"
+    m = re.match(r'^lo(?:opback)?[-_]?(\d+)$', low)
+    if m:
+        return "system0" if m.group(1) == "0" else f"lo{m.group(1)}"
+    m = re.match(r'^vl(?:an)?[-_]?(\d+)$', low)
+    if m:
+        return "irb0"
+    if low == 'irb':
+        return "irb0"
+    return s
+
+
 class InterfaceStatus(object):
+    _arista_to_srl_intf = staticmethod(_arista_to_srl_intf)
+
     def get_syntax_status(self):
         result = Syntax('status', help='Show arista interface status for interfaces')
         return result
@@ -65,30 +97,45 @@ class InterfaceStatus(object):
 
     def _stream_data(self, state, arguments):
         intf_name = '*'
-        try:
-            if hasattr(arguments, 'has_node'):
-                if arguments.has_node('interface') and arguments.has_argument('name'):
-                    intf_name = arguments.get('interface', 'name') or '*'
-                elif arguments.has_node('interfaces') and arguments.has_argument('name'):
-                    intf_name = arguments.get('interfaces', 'name') or '*'
-        except Exception:
-            intf_name = '*'
+        for src in (arguments, getattr(state, 'line_commands', None)):
+            if not src or not hasattr(src, 'has_node'):
+                continue
+            try:
+                if src.has_node('interfaces'):
+                    val = src.get_value_or('interfaces', 'name', '*')
+                    if val and val != '*':
+                        intf_name = val
+                        break
+                if src.has_node('interface'):
+                    val = src.get_value_or('interface', 'name', '*')
+                    if val and val != '*':
+                        intf_name = val
+                        break
+            except Exception:
+                pass
+        intf_name = self._arista_to_srl_intf(intf_name)
         path = build_path('/interface[name={name}]', name=intf_name)
         return state.server.get_data_store(DataStore.State).stream_data(path, recursive=False, include_container_children=True)
 
     def _populate_data(self, data, serve_data):
         data.synchronizer.flush_fields(data)
         for interface in serve_data.interface.items():
-            disp_name = format_arista_intf(interface.name, short=False)
+            raw_name = str(getattr(interface, 'name', '') or '')
+            disp_name = format_arista_intf(raw_name, short=False)
             child = data.ifbrief.create(disp_name)
             child.name = getattr(interface, 'description', '') or '--'
-            child.status = "notconnected"
-            if getattr(interface, 'oper_state', '') == "up":
-                child.status = "connected"                
-            child.vlan = "routed" if getattr(interface, 'oper_state', '') == "up" else "--"
+            admin_state = getattr(interface, 'admin_state', 'disable')
+            oper_state = getattr(interface, 'oper_state', 'down')
+            if admin_state != "enable":
+                child.status = "disabled"
+            elif oper_state == "up":
+                child.status = "connected"
+            else:
+                child.status = "notconnect"
+            child.vlan = "routed" if oper_state == "up" else "--"
             if getattr(interface, 'vlan_tagging', False):
                 child.vlan = "trunk"
-            child.duplex = "full"
+            child.duplex = "full" if raw_name.startswith("ethernet-") else "N/A"
             child.speed = "--"
             if hasattr(interface, 'ethernet') and interface.ethernet.exists():
                 try:

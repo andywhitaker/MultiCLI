@@ -251,12 +251,40 @@ class AristaRoutingReports:
             pass
 
         intfs_by_ni = {}
+        raw_intfs_by_ni = {}
         try:
             intf_p = build_path('/network-instance[name=*]/interface[name=*]')
             intf_data = state.server.get_data_store(DataStore.State).get_data(intf_p, recursive=False)
             for ni in intf_data.network_instance.items():
                 if hasattr(ni, 'interface'):
-                    intfs_by_ni[ni.name] = [format_arista_intf(intf.name, short=False) for intf in ni.interface.items()]
+                    raw_list = [intf.name for intf in ni.interface.items()]
+                    raw_intfs_by_ni[ni.name] = raw_list
+                    intfs_by_ni[ni.name] = [format_arista_intf(n, short=False) for n in raw_list]
+        except Exception:
+            pass
+
+        v4_subintfs = set()
+        v6_subintfs = set()
+        try:
+            v4_p = build_path('/interface[name=*]/subinterface[index=*]/ipv4/admin-state')
+            v4_data = state.server.get_data_store(DataStore.State).get_data(v4_p, recursive=False)
+            for intf in v4_data.interface.items():
+                if hasattr(intf, 'subinterface'):
+                    for sub in intf.subinterface.items():
+                        if hasattr(sub, 'ipv4') and sub.ipv4.exists():
+                            if _safe_get(sub.ipv4.get(), 'admin_state', '') == 'enable':
+                                v4_subintfs.add(f"{intf.name}.{sub.index}")
+        except Exception:
+            pass
+        try:
+            v6_p = build_path('/interface[name=*]/subinterface[index=*]/ipv6/admin-state')
+            v6_data = state.server.get_data_store(DataStore.State).get_data(v6_p, recursive=False)
+            for intf in v6_data.interface.items():
+                if hasattr(intf, 'subinterface'):
+                    for sub in intf.subinterface.items():
+                        if hasattr(sub, 'ipv6') and sub.ipv6.exists():
+                            if _safe_get(sub.ipv6.get(), 'admin_state', '') == 'enable':
+                                v6_subintfs.add(f"{intf.name}.{sub.index}")
         except Exception:
             pass
 
@@ -270,14 +298,15 @@ class AristaRoutingReports:
                     rd = rd_by_ni.get(name, "-")
 
                     intfs = intfs_by_ni.get(name, [])
+                    raw_intfs = raw_intfs_by_ni.get(name, [])
 
                     if ni_type == 'mac-vrf':
                         proto_str = "-"
                         v4_state = "v4:no routing,"
                         v6_state = "v6:no routing"
                     else:
-                        has_v4 = bool(intfs)
-                        has_v6 = False
+                        has_v4 = any(ri in v4_subintfs for ri in raw_intfs) or bool(intfs)
+                        has_v6 = any(ri in v6_subintfs for ri in raw_intfs)
                         protos = ['ipv4']
                         if has_v6:
                             protos.append('ipv6')

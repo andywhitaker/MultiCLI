@@ -41,12 +41,12 @@ MultiCLI allows users to execute familiar Juniper JUNOS commands on Nokia SR Lin
 Deploy the containerlab topology and log in to a switch configured with the Juniper JUNOS persona (or use `juser/juser`):
 
 ```bash
-docker exec -it leaf3 sr_cli
+docker exec -it leaf2-1 sr_cli
 ```
 
 Or switch any node on-the-fly using the helper script:
 ```bash
-./switch-multicli.sh juniper leaf1
+./switch-multicli.sh juniper leaf2-1
 ```
 
 > [!NOTE]
@@ -72,7 +72,7 @@ Where `<name>` is either omitted or identifies a (sub-)interface on the system.
     <summary>Example execution (terse)</summary>
 
     --{ running }--[  ]--
-    A:admin@srl# show interfaces ethernet-1/3 terse
+    A:admin@leaf2-1# show interfaces ethernet-1/3 terse
     Interface               Admin Link Proto    Local                 Remote
     ethernet-1/3            up    up
     ethernet-1/3.0          up    up   inet     10.3.3.1/24
@@ -90,7 +90,7 @@ Where `<name>` is either omitted or identifies a (sub-)interface on the system.
     <summary>Example execution (brief)</summary>
 
     --{ running }--[  ]--
-    A:admin@srl# show interfaces brief ethernet-1/3
+    A:admin@leaf2-1# show interfaces brief ethernet-1/3
     Physical interface: ethernet-1/3, Enabled, Physical link is Up
     Link-level type: Ethernet, MTU: 9232, MRU: 9240, Unknown mode, Speed: 25G, Loopback: Disabled, Source filtering: N/A,  Flow control: Disabled, Auto-negotiation: Enabled, Remote fault: Online
     Device flags   : Present Running Up
@@ -116,7 +116,7 @@ Where `<name>` is either omitted or identifies a (sub-)interface on the system.
     <summary>Example execution (regular)</summary>
 
     --{ running }--[  ]--
-    A:admin@srl# show interfaces ethernet-1/3
+    A:admin@leaf2-1# show interfaces ethernet-1/3
     Physical interface: ethernet-1/3, Enabled, Physical link is Up
     Interface index: 81918, SNMP ifIndex: N/A
     Link-level type: Ethernet, MTU: 9232, MRU: 9240, Unknown mode, Speed: 25G, BPDU Error: N/A, Loop Detect PDU Error: N/A, Ethernet-Switching Error: N/A, MAC-REWRITE Error: N/A, Loopback: Disabled, Source filtering: N/A,Flow control: Disabled, Auto-negotiation: Enabled, Remote fault: Online

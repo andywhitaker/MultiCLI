@@ -83,9 +83,9 @@ class CiscoSystemReports:
                 if hasattr(ctrl, 'memory') and ctrl.memory.exists():
                     mem = ctrl.memory.get()
                     if hasattr(mem, 'physical') and mem.physical:
-                        total_mem = mem.physical
+                        total_mem = int(mem.physical) // 1024
                     if hasattr(mem, 'free') and mem.free:
-                        free_mem = mem.free
+                        free_mem = int(mem.free) // 1024
         except Exception:
             pass
 

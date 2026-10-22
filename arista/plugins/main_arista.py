@@ -129,6 +129,17 @@ class Plugin(CliPlugin):
             return parent.root.get_command_or_none(name)
         return None
 
+    def _default_container_help(self, state, output, arguments, **_kwargs):
+        if not state.is_last_command:
+            return
+        from srlinux.mgmt.cli.help_formatter import CommandHelpFormatter
+        children = arguments.node.get_filtered_commands(state)
+        help_text = CommandHelpFormatter(
+            arguments.node, children, output_width=output.screen_width,
+            state=state, help_detail=False, partial_word=''
+        ).format()
+        output.print(help_text + '\n')
+
     def _add_or_override(self, parent, syntax, callback=None, schema=None, update_location=False):
         node = self._get_child(parent, syntax.name)
         if node:
@@ -136,8 +147,7 @@ class Plugin(CliPlugin):
                 node.set_callback(callback)
             return node
         kwargs = {'update_location': update_location}
-        if callback is not None:
-            kwargs['callback'] = callback
+        kwargs['callback'] = callback if callback is not None else self._default_container_help
         if schema is not None:
             kwargs['schema'] = schema
         return parent.add_command(syntax, **kwargs)
@@ -492,6 +502,15 @@ class Plugin(CliPlugin):
             update_location=False
         )
 
+        # 10. ARP Command (show arp / eos show arp)
+        self._add_or_override(
+            target,
+            ArpDetails()._get_syntax_arp(),
+            update_location=False,
+            callback=self._arp_entries,
+            schema=ArpDetails()._get_arp_schema(True)
+        )
+
     def load(self, cli, **_kwargs):
         self._cli = cli
         # 1. Root global command 'eos' for interactive submode and one-liners:
@@ -512,15 +531,6 @@ class Plugin(CliPlugin):
             update_location=False
         )
         self._register_all_commands(eos_show)
-
-        # Also support arp on eos_show
-        self._add_or_override(
-            eos_show,
-            ArpDetails()._get_syntax_arp(),
-            update_location=False,
-            callback=self._arp_entries,
-            schema=ArpDetails()._get_arp_schema(True)
-        )
 
     def on_start(self, state):
         if os.getuid() != 0:
@@ -602,8 +612,21 @@ class Plugin(CliPlugin):
             return
         AristaRoutingReports().show_ip_route(state, output, vrf='default')
 
+    def _extract_node_arg(self, state, arguments, node_name, arg_name, default='default'):
+        for src in (arguments, getattr(state, 'line_commands', None)):
+            if not src or not hasattr(src, 'has_node'):
+                continue
+            try:
+                if src.has_node(node_name):
+                    val = src.get_value_or(node_name, arg_name, default)
+                    if val:
+                        return val
+            except Exception:
+                pass
+        return default
+
     def _print_vrf_route(self, state, arguments, output, **_kwargs):
-        vrf_name = arguments.get('vrf_name') or 'default'
+        vrf_name = self._extract_node_arg(state, arguments, 'vrf', 'vrf_name', 'default')
         AristaRoutingReports().show_ip_route(state, output, vrf=vrf_name)
 
     def _print_ip_interface_brief(self, state, output, **_kwargs):
@@ -642,19 +665,19 @@ class Plugin(CliPlugin):
         AristaInterfaceReports().show_port_channel_summary(state, output)
 
     def _print_summary(self, state, arguments, output, **_kwargs):
-        netinst = arguments.get('summary', 'vrf') if arguments.has_node('summary') else 'default'
+        netinst = self._extract_node_arg(state, arguments, 'summary', 'vrf', 'default')
         BaseBgpReport().show_bgp_summary(state, output, network_instance=netinst)
         output.print_line("-" * 100)
         output.print_line(f'Try SR Linux command: show network-instance {netinst} protocols bgp neighbor')
 
     def _print_vrf_bgp_summary(self, state, arguments, output, **_kwargs):
-        netinst = arguments.get('vrf', 'vrf_name') if arguments.has_node('vrf') else 'default'
+        netinst = self._extract_node_arg(state, arguments, 'vrf', 'vrf_name', 'default')
         BaseBgpReport().show_bgp_summary(state, output, network_instance=netinst)
         output.print_line("-" * 100)
         output.print_line(f'Try SR Linux command: show network-instance {netinst} protocols bgp neighbor')
 
     def _print_evpn_summary(self, state, arguments, output, **_kwargs):
-        netinst = arguments.get('summary', 'vrf') if arguments.has_node('summary') else 'default'
+        netinst = self._extract_node_arg(state, arguments, 'summary', 'vrf', 'default')
         EvpnBgpReport().show_bgp_summary(state, output, network_instance=netinst)
         output.print_line("-" * 100)
         output.print_line(f'Try SR Linux command: show network-instance {netinst} protocols bgp neighbor')
@@ -664,48 +687,61 @@ class Plugin(CliPlugin):
         esi_input = arguments.get('auto-discovery', 'esi')
         EvpnBgpReport().show_evpn_rt1(state, output, network_instance=netinst, esi_value=esi_input)
         output.print_line("-" * 100)
-        output.print_line('Try SR Linux command: show network-instance default protocols bgp routes evpn route-type 1 summary')
+        output.print_line(f'Try SR Linux command: show network-instance {netinst} protocols bgp routes evpn route-type 1 summary')
 
     def _print_2(self, state, arguments, output, **_kwargs):
         netinst = arguments.get('mac-ip', 'vrf')
         mac_input = arguments.get('mac-ip', 'mac-address')
         EvpnBgpReport().show_evpn_rt2(state, output, network_instance=netinst, mac_value=mac_input)
         output.print_line("-" * 100)
-        output.print_line('Try SR Linux command: show network-instance default protocols bgp routes evpn route-type 2 summary')
+        output.print_line(f'Try SR Linux command: show network-instance {netinst} protocols bgp routes evpn route-type 2 summary')
 
     def _print_3(self, state, arguments, output, **_kwargs):
         netinst = arguments.get('imet', 'vrf')
         originr_input = arguments.get('imet', 'origin-router')
         EvpnBgpReport().show_evpn_rt3(state, output, network_instance=netinst, originr_value=originr_input)
         output.print_line("-" * 100)
-        output.print_line('Try SR Linux command: show network-instance default protocols bgp routes evpn route-type 3 summary')
+        output.print_line(f'Try SR Linux command: show network-instance {netinst} protocols bgp routes evpn route-type 3 summary')
 
     def _print_4(self, state, arguments, output, **_kwargs):
         netinst = arguments.get('ethernet-segment', 'vrf')
         esi4_input = arguments.get('ethernet-segment', 'esi')
         EvpnBgpReport().show_evpn_rt4(state, output, network_instance=netinst, esi4_value=esi4_input)
         output.print_line("-" * 100)
-        output.print_line('Try SR Linux command: show network-instance default protocols bgp routes evpn route-type 4 summary')
+        output.print_line(f'Try SR Linux command: show network-instance {netinst} protocols bgp routes evpn route-type 4 summary')
 
     def _print_5(self, state, arguments, output, **_kwargs):
         netinst = arguments.get('ip-prefix', 'vrf')
         ip_input = arguments.get('ip-prefix', 'ip-address')
         EvpnBgpReport().show_evpn_rt5(state, output, network_instance=netinst, ip_value=ip_input)
         output.print_line("-" * 100)
-        output.print_line('Try SR Linux command: show network-instance default protocols bgp routes evpn route-type 5 summary')
+        output.print_line(f'Try SR Linux command: show network-instance {netinst} protocols bgp routes evpn route-type 5 summary')
+
+    def _extract_intf_arg(self, state, arguments):
+        for src in (arguments, getattr(state, 'line_commands', None)):
+            if not src or not hasattr(src, 'has_node'):
+                continue
+            try:
+                if src.has_node('interfaces'):
+                    val = src.get_value_or('interfaces', 'name', '*')
+                    if val and val != '*':
+                        return val
+                if src.has_node('interface'):
+                    val = src.get_value_or('interface', 'name', '*')
+                    if val and val != '*':
+                        return val
+            except Exception:
+                pass
+        return '*'
 
     def _interface_details(self, state, arguments, output, **_kwargs):
         if not state.is_last_command:
             return
         InterfaceDetails().print(state, arguments, output, **_kwargs)
-        name = None
-        if hasattr(arguments, 'has_node'):
-            if arguments.has_node('interface'):
-                name = arguments.get('interface', 'name')
-            elif arguments.has_node('interfaces'):
-                name = arguments.get('interfaces', 'name')
+        name = self._extract_intf_arg(state, arguments)
         if name and name != '*':
-            msg = f'Try SR Linux command: show interface {name} detail'
+            srl_name = InterfaceDetails._arista_to_srl_intf(name)
+            msg = f'Try SR Linux command: show interface {srl_name} detail'
         else:
             msg = 'Try SR Linux command: show interface detail'
         output.print_line(f'\n{"-" * len(msg)}\n{msg}')
@@ -714,14 +750,10 @@ class Plugin(CliPlugin):
         if not state.is_last_command:
             return
         InterfaceStatus().print(state, arguments, output)
-        name = None
-        if hasattr(arguments, 'has_node'):
-            if arguments.has_node('interface'):
-                name = arguments.get('interface', 'name')
-            elif arguments.has_node('interfaces'):
-                name = arguments.get('interfaces', 'name')
+        name = self._extract_intf_arg(state, arguments)
         if name and name != '*':
-            msg = f'Try SR Linux command: show interface {name} brief'
+            srl_name = InterfaceDetails._arista_to_srl_intf(name)
+            msg = f'Try SR Linux command: show interface {srl_name} brief'
         else:
             msg = 'Try SR Linux command: show interface brief'
         output.print_line(f'\n{"-" * len(msg)}\n{msg}')

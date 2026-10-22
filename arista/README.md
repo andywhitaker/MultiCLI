@@ -47,12 +47,12 @@ MultiCLI allows users to execute familiar Arista EOS commands on Nokia SR Linux 
 Deploy the containerlab topology and log in to a switch configured with the Arista EOS persona (or use `auser/auser`):
 
 ```bash
-docker exec -it leaf1 sr_cli
+docker exec -it leaf1-1 sr_cli
 ```
 
 Or switch any node on-the-fly using the helper script:
 ```bash
-./switch-multicli.sh arista leaf1
+./switch-multicli.sh arista leaf1-1
 ```
 
 ## Custom CLI Plugin scripts

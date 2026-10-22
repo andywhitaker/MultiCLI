@@ -27,6 +27,44 @@ import re
 #logger = logging.getLogger(__name__)
 #logger.level = logging.DEBUG
 
+def _junos_to_srl_intf(name):
+    """Translate Juniper JUNOS interface naming to SR Linux naming."""
+    if not name or name == "*":
+        return name
+    raw = str(name).strip()
+    sub = ""
+    if "." in raw:
+        base, sub_part = raw.split(".", 1)
+        sub = f".{sub_part}"
+    else:
+        base = raw
+    low = base.lower()
+    m = re.match(r'^(?:et|xe|ge)-(\d+)/(\d+)/(\d+)(?::(\d+))?$', low)
+    if m:
+        fpc, pic, port, ch = m.group(1), m.group(2), m.group(3), m.group(4)
+        if fpc == "0":
+            slot = 1
+            port_num = int(port) + 1
+        else:
+            slot = int(fpc)
+            port_num = int(port) if int(port) > 0 else 1
+        if ch is not None:
+            return f"ethernet-{slot}/{port_num}/{ch}{sub}"
+        return f"ethernet-{slot}/{port_num}{sub}"
+    m = re.match(r'^ae(\d+)$', low)
+    if m:
+        return f"lag{m.group(1)}{sub}"
+    m = re.match(r'^lo(\d+)$', low)
+    if m:
+        return f"system0{sub}" if m.group(1) == "0" else f"lo{m.group(1)}{sub}"
+    m = re.match(r'^(?:fxp|em|me)(\d+)$', low)
+    if m:
+        return f"mgmt0{sub}"
+    if low == "irb":
+        return f"irb0{sub}"
+    return raw
+
+
 class EthernetSwitchingReport:
     '''
         'show ethernet-switching table' : Gives all MAC Table entries
@@ -59,16 +97,26 @@ class EthernetSwitchingReport:
                               'Active Source'])
         return root
 
+    def _get_arg(self, node_name, arg_name, default=None):
+        for src in (self._arguments, getattr(self._state, 'line_commands', None)):
+            if src is None:
+                continue
+            try:
+                if src.has_node(node_name):
+                    val = src.get_value_or(node_name, arg_name, default)
+                    if val is not None and val != default:
+                        return str(val)
+            except Exception:
+                pass
+        return default
+
     def _show_table_instance(self, state: CliState, output, arguments: CommandNodeWithArguments, **kwargs,):
         """Main display function"""
         self._state = state
         self._arguments = arguments
-        if arguments.has_node('instance'):
-            netinst_data = self._fetch_state_network(arguments.get('instance','name'))
-        elif arguments.has_node('interface'):
-            netinst_data = self._fetch_state_network('*')
-        elif arguments.has_node('vlan'):
-            netinst_data = self._fetch_state_network('*')
+        inst_name = self._get_arg('instance', 'name', None)
+        if inst_name:
+            netinst_data = self._fetch_state_network(inst_name)
         else:
             netinst_data = self._fetch_state_network('*')
 
@@ -269,9 +317,10 @@ class EthernetSwitchingReport:
         return ""
 
     def _populate_mac_table(self, netinst_server_data, data_root):
-        subinterface_name = self._arguments.get_value_or('interface','name',None)
+        raw_intf_arg = self._get_arg('interface', 'name', None)
+        subinterface_name = _junos_to_srl_intf(raw_intf_arg) if raw_intf_arg is not None else None
         interface_as_argument = True if subinterface_name and "." not in subinterface_name else False
-        vlan_value = self._arguments.get_value_or('vlan','value',None)
+        vlan_value = self._get_arg('vlan', 'value', None)
 
         for netinst in netinst_server_data.network_instance.items():
             if netinst.type != 'mac-vrf':
@@ -300,12 +349,13 @@ class EthernetSwitchingReport:
 
             for mac_entry in mac_data.get_descendants('/network-instance/bridge-table/mac-table/mac'):
                 logical_subinterface = self._get_logical_interface(mac_entry.address, mac_entry.destination, irb_interface_name_index_list)
-                logical_interface = logical_subinterface.split('.')[0] if logical_subinterface else None
+                clean_subintf = logical_subinterface.replace('(R)', '') if logical_subinterface else ''
+                logical_interface = clean_subintf.split('.')[0] if clean_subintf else None
                 vlan = self._find_vlan(interface_name_index_list,logical_subinterface)
                 if vlan == "-":
                     vlan = default_netinst_vlan
                 # if an interface (without the "".subint") is given as argument we populate the mac table for all its subinterfaces
-                if subinterface_name is not None and subinterface_name != logical_subinterface:
+                if subinterface_name is not None and subinterface_name not in (logical_subinterface, clean_subintf):
                     if not interface_as_argument or subinterface_name != logical_interface:
                         continue
                 if vlan_value is not None and vlan_value != vlan:

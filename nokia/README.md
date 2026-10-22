@@ -25,7 +25,16 @@ The following CLI plugins are available in this repo:
 
 ## Testing
 
-Deploy the EVPN lab. Login to any leaf or spine node using `nokuser/nokuser` and try any of the above commands.
+Deploy the EVPN lab and log in to a switch configured with the Nokia SR OS persona (or use `nokuser/nokuser`):
+
+```bash
+docker exec -it leaf2-2 sr_cli
+```
+
+Or switch any node on-the-fly using the helper script:
+```bash
+./switch-multicli.sh nokia leaf2-2
+```
 
 ## Nokia SROS scripts
 
@@ -48,7 +57,7 @@ Where `evpn-vxlan` is an EVPN-enabled service with VxLAN transport tunnels.
 
     ```
     --{ + running }--[  ]--
-    A:admin@leaf-3# /show service id evpn-vxlan vxlan destinations
+    A:admin@leaf2-2# /show service id evpn-vxlan vxlan destinations
 
     ===============================================================================
     Egress VTEP, VNI (Instance 1)
@@ -108,7 +117,7 @@ Where `srmpls-evpn-vpls` is an EVPN-enabled service with SR-MPLS transport tunne
 
     ```
     --{ + running }--[  ]--
-    A:CE-SXR-1# / show service id srmpls-evpn-vpls evpn-mpls
+    A:admin@leaf2-2# / show service id srmpls-evpn-vpls evpn-mpls
 
     ===============================================================================
     BGP EVPN-MPLS Dest (Instance 1)

@@ -236,6 +236,8 @@ def run_agent():
 def process_notification(notification):
 
     if notification.HasField("config"):
+        if notification.config.key.js_path != ".multicli":
+            return
 
         if notification.config.op == config_service_pb2.ConfigNotification.Operation.Delete:
             logging.info("--> Received config delete notification; cleaning MultiCLI assets")
@@ -402,7 +404,7 @@ def multicli_function(selected_nos, seleceted_repo_url):
                 zip_path = os.path.join(tmp_dir, "repo.zip")
                 try:
                     # Downloading repo (TLS certificate verification enforced)
-                    subprocess.run(["/usr/bin/curl", "-L", "--retry", "3", "--retry-delay", "2", "--retry-all-errors", "--connect-timeout", "10", "--max-time", "60", "-o", zip_path, "--", seleceted_repo_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, env=os.environ)
+                    subprocess.run(["/usr/bin/curl", "-f", "-L", "--retry", "3", "--retry-delay", "2", "--retry-all-errors", "--connect-timeout", "10", "--max-time", "60", "-o", zip_path, "--", seleceted_repo_url], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, env=os.environ)
                     logging.info(f"Unzipping Repo...")
 
                     try:

@@ -119,6 +119,17 @@ class Plugin(CliPlugin):
             return parent.root.get_command_or_none(name)
         return None
 
+    def _default_container_help(self, state, output, arguments, **_kwargs):
+        if not state.is_last_command:
+            return
+        from srlinux.mgmt.cli.help_formatter import CommandHelpFormatter
+        children = arguments.node.get_filtered_commands(state)
+        help_text = CommandHelpFormatter(
+            arguments.node, children, output_width=output.screen_width,
+            state=state, help_detail=False, partial_word=''
+        ).format()
+        output.print(help_text + '\n')
+
     def _add_or_override(self, parent, syntax, callback=None, schema=None, update_location=False):
         node = self._get_child(parent, syntax.name)
         if node:
@@ -126,8 +137,7 @@ class Plugin(CliPlugin):
                 node.set_callback(callback)
             return node
         kwargs = {'update_location': update_location}
-        if callback is not None:
-            kwargs['callback'] = callback
+        kwargs['callback'] = callback if callback is not None else self._default_container_help
         if schema is not None:
             kwargs['schema'] = schema
         return parent.add_command(syntax, **kwargs)

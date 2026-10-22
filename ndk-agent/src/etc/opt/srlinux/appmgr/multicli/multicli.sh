@@ -25,6 +25,8 @@ if [ -d "${PYBASE}/python3.13" ]; then
     PYVER="python3.13" # SRL 26.X
 elif [ -d "${PYBASE}/python3.11" ]; then
     PYVER="python3.11" # SRL 25.X
+else
+    PYVER=$(ls -d "${PYBASE}"/python3.* 2>/dev/null | head -n 1 | xargs basename 2>/dev/null || echo "python3.11")
 fi
 
 export PYTHONPATH="$PYTHONPATH:/etc/opt/srlinux/helper:/etc/opt/srlinux/appmgr/multicli:/opt/srlinux/bin:/usr/lib/${PYVER}/dist-packages/sdk_protos:/usr/lib/${PYVER}/dist-packages"

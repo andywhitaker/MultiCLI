@@ -40,20 +40,63 @@ class MacAddressTableReport:
                           keys=['MAC Flags', 'Vlan', 'Address','Type','Age','Secure','NTFY','Ports','instance'])
         return root
 
+    @staticmethod
+    def _cisco_to_srl_intf(name):
+        if not name or name == '*':
+            return name
+        s = str(name).strip()
+        if s.endswith('(R)'):
+            s = s[:-3]
+        sub = None
+        if '.' in s and not s.lower().startswith('vlan'):
+            s, sub = s.split('.', 1)
+        low = s.lower()
+        m = re.match(r'^et(?:h(?:ernet)?)?[-_]?(\d+/\d+(?:/\d+)?)$', low)
+        if m:
+            base = f"ethernet-{m.group(1)}"
+        else:
+            m = re.match(r'^po(?:rt-channel)?[-_]?(\d+)$', low)
+            if m:
+                base = f"lag{m.group(1)}"
+            else:
+                m = re.match(r'^lo(?:opback)?[-_]?(\d+)$', low)
+                if m:
+                    base = "system0" if m.group(1) == "0" else f"lo{m.group(1)}"
+                else:
+                    m = re.match(r'^(?:ma(?:nagement)?|mgmt)[-_]?(\d+)$', low)
+                    if m:
+                        base = "mgmt0"
+                    else:
+                        m = re.match(r'^vl(?:an)?[-_]?(\d+)$', low)
+                        if m:
+                            base = "irb0"
+                        elif low in ('irb', 'irb-interface'):
+                            base = "irb0"
+                        else:
+                            base = low
+        if sub is not None and sub != '0':
+            return f"{base}.{sub}"
+        return base
+
+    def _get_arg(self, node_name, arg_name, default=None):
+        for src in (self._arguments, getattr(self._state, 'line_commands', None)):
+            if not src or not hasattr(src, 'has_node'):
+                continue
+            try:
+                if src.has_node(node_name):
+                    val = src.get_value_or(node_name, arg_name, default)
+                    if val is not None and val != default:
+                        return val
+            except Exception:
+                pass
+        return default
+
     def _show_table_instance(self, state: CliState, output, arguments: CommandNodeWithArguments, **kwargs,):
         """Main display function"""
         self._state = state
         self._arguments = arguments
-        if arguments.has_node('instance'):
-            netinst_data = self._fetch_state_network(arguments.get('instance','name'))
-        elif arguments.has_node('interface'):
-            netinst_data = self._fetch_state_network('*')
-        elif arguments.has_node('vlan'):
-            netinst_data = self._fetch_state_network('*')
-        elif arguments.has_node('vni'):
-            netinst_data = self._fetch_state_network('*')
-        else:
-            netinst_data = self._fetch_state_network('*')
+        inst_name = self._get_arg('instance', 'name', '*')
+        netinst_data = self._fetch_state_network(inst_name)
 
         data_root = Data(arguments.schema)
         self._set_all_formatters(data_root)
@@ -317,10 +360,11 @@ class MacAddressTableReport:
         return ""
 
     def _populate_mac_table(self, netinst_server_data, data_root):
-        subinterface_name = self._arguments.get_value_or('interface','name',None)
-        interface_as_argument = True if subinterface_name and "." not in subinterface_name else False
-        vlan_value = self._arguments.get_value_or('vlan','value',None)
-        vni_value = self._arguments.get_value_or('vni','value',None)
+        raw_intf_filter = self._get_arg('interface', 'name', None)
+        interface_filter = self._cisco_to_srl_intf(raw_intf_filter) if raw_intf_filter else None
+        interface_as_argument = True if interface_filter and "." not in interface_filter else False
+        vlan_value = self._get_arg('vlan', 'value', None)
+        vni_value = self._get_arg('vni', 'value', None)
 
         mac_add_table_data = data_root.mac_address_table.create()
         mac_add_table_data.header = ""
@@ -353,19 +397,20 @@ class MacAddressTableReport:
             for mac_entry in mac_data.get_descendants('/network-instance/bridge-table/mac-table/mac'):
                 logical_subinterface = self._get_logical_interface(mac_entry.destination)
                 port_info = self._get_port_info(mac_entry.address, mac_entry.destination, mac_entry.destination_type, irb_interface_name_index_list)
-                logical_interface = logical_subinterface.split('.')[0] if logical_subinterface else None
+                norm_sub = self._cisco_to_srl_intf(logical_subinterface or port_info)
+                norm_base = norm_sub.split('.', 1)[0] if norm_sub else None
                 vlan = self._find_vlan(interface_name_index_list, logical_subinterface)
                 if vlan == "-":
                     vlan = default_netinst_vlan
                 vni = self._get_vni(mac_entry.destination, vxlan_interface_name_vni_list)
 
                 # if an interface (without the "".subint") is given as argument we populate the mac table for all its subinterfaces
-                if subinterface_name is not None and subinterface_name != logical_subinterface:
-                    if not interface_as_argument or subinterface_name != logical_interface:
+                if interface_filter is not None and interface_filter != norm_sub:
+                    if not interface_as_argument or interface_filter != norm_base:
                         continue
-                if vlan_value is not None and vlan_value != vlan:
+                if vlan_value is not None and str(vlan_value) != str(vlan):
                      continue
-                if vni_value is not None and vni_value != vni:
+                if vni_value is not None and str(vni_value) != str(vni):
                      continue
 
                 mac_aging = 'NA'

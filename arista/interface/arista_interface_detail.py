@@ -133,7 +133,7 @@ class InterfaceDetails(object):
         traffic_rate_bps = float(traffic_rate)  
         port_speed_bps = self.convert_speed_to_bps(port_speed)  
 
-        if port_speed_bps == 0:
+        if not port_speed_bps:
             return 0.0
 
         utilization = (traffic_rate_bps / port_speed_bps) * 100
@@ -147,20 +147,65 @@ class InterfaceDetails(object):
         except Exception:
             return default
 
-    def _fetch_state(self, state, arguments, output):
-        try:
-            interface_name = arguments.get('interface', 'name') or '*'
-        except Exception:
-            try:
-                interface_name = arguments.get('interfaces', 'name') or '*'
-            except Exception:
-                interface_name = '*'
+    @staticmethod
+    def _arista_to_srl_intf(name):
+        if not name or name == '*':
+            return '*'
+        import re
+        s = str(name).strip()
+        if '.' in s and not s.lower().startswith('vlan'):
+            s = s.split('.', 1)[0]
+        low = s.lower()
+        m = re.match(r'^et(?:h(?:ernet)?)?[-_]?(\d+/\d+(?:/\d+)?)$', low)
+        if m:
+            return f"ethernet-{m.group(1)}"
+        m = re.match(r'^po(?:rt-channel)?[-_]?(\d+)$', low)
+        if m:
+            return f"lag{m.group(1)}"
+        m = re.match(r'^(?:ma(?:nagement)?|mgmt)[-_]?(\d+)$', low)
+        if m:
+            return "mgmt0"
+        m = re.match(r'^lo(?:opback)?[-_]?(\d+)$', low)
+        if m:
+            return "system0" if m.group(1) == "0" else f"lo{m.group(1)}"
+        m = re.match(r'^vl(?:an)?[-_]?(\d+)$', low)
+        if m:
+            return "irb0"
+        if low == 'irb':
+            return "irb0"
+        return s
 
-        path = build_path('/interface[name={name}]', name=interface_name) 
+    def _fetch_state(self, state, arguments, output):
+        interface_name = '*'
+        for src in (arguments, getattr(state, 'line_commands', None)):
+            if not src or not hasattr(src, 'has_node'):
+                continue
+            try:
+                if src.has_node('interfaces'):
+                    val = src.get_value_or('interfaces', 'name', '*')
+                    if val and val != '*':
+                        interface_name = val
+                        break
+                if src.has_node('interface'):
+                    val = src.get_value_or('interface', 'name', '*')
+                    if val and val != '*':
+                        interface_name = val
+                        break
+            except Exception:
+                pass
+
+        srl_intf_name = self._arista_to_srl_intf(interface_name)
+        path = build_path('/interface[name={name}]', name=srl_intf_name)
         my_data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True, include_container_children=True)
 
         for intf in my_data.interface.items():
             interface_name = intf.name
+            raw_lower = str(interface_name).lower()
+            is_eth = hasattr(intf, 'ethernet') and intf.ethernet.exists()
+            is_lag = raw_lower.startswith('lag')
+            is_loop = raw_lower.startswith('system') or raw_lower.startswith('lo')
+            is_irb = raw_lower.startswith('irb')
+
             admin_status = self._safe_get(intf, 'admin_state', 'disable')
             oper_status = self._safe_get(intf, 'oper_state', 'down')
             if admin_status == "enable":
@@ -172,35 +217,83 @@ class InterfaceDetails(object):
             else:
                 connection_status = "notconnected"
             raw_mac_address = ""
-            if hasattr(intf, 'ethernet') and intf.ethernet.exists():
+            if is_eth:
                 raw_mac_address = self._safe_get(intf.ethernet.get(), 'hw_mac_address', '')
             mac_address = self.convert_mac(raw_mac_address) or "0000.0000.0000"
             bia_address = mac_address
-            mtu = self._safe_get(intf, 'mtu', 1500)
-            #bandwidth calculation with exception handling
-            port_speed = "100G"
-            try:
-                if hasattr(intf, 'ethernet') and intf.ethernet.exists():
-                    port_speed = self._safe_get(intf.ethernet.get(), 'port_speed', '100G')
-                if not port_speed or not isinstance(port_speed, str):
-                    raise ValueError("Invalid or missing port speed")
+            mtu = self._safe_get(intf, 'mtu', None)
+            if mtu is None:
+                if hasattr(intf, 'subinterface'):
+                    for sub in intf.subinterface.items():
+                        sub_mtu = self._safe_get(sub, 'ip_mtu', None) or self._safe_get(sub, 'l2_mtu', None)
+                        if sub_mtu:
+                            mtu = sub_mtu
+                            break
+                if mtu is None:
+                    mtu = 1500 if (is_loop or is_irb or raw_lower.startswith('mgmt')) else 9232
 
-                bandwidth = self.convert_speed_to_kbit(port_speed)
+            ip_addr = None
+            if hasattr(intf, 'subinterface'):
+                for sub in intf.subinterface.items():
+                    if hasattr(sub, 'ipv4') and sub.ipv4.exists():
+                        v4_obj = sub.ipv4.get()
+                        if hasattr(v4_obj, 'address'):
+                            for a in v4_obj.address.items():
+                                pfx = self._safe_get(a, 'ip_prefix', None)
+                                if pfx:
+                                    ip_addr = str(pfx)
+                                    break
+                    if ip_addr:
+                        break
 
-            except Exception:
-                bandwidth = None
+            # Determine hardware type, speed, bandwidth, duplex dynamically
+            hardware_type = "Ethernet"
+            port_speed = None
+            bandwidth = 0
             duplex = "Full"
             auto_negotiation = "off"
-            try:
-                if hasattr(intf, 'ethernet') and intf.ethernet.exists():
-                    eth_obj = intf.ethernet.get()
-                    duplex = self._safe_get(eth_obj, 'duplex_mode', 'Full')
-                    an = self._safe_get(eth_obj, 'auto_negotiate', None)
-                    if an is True or an == 'true' or an == 'enable':
-                        auto_negotiation = "on"
-            except Exception:
-                duplex = "Full"
-                auto_negotiation = "off"
+            show_phys_line = False
+
+            if is_loop:
+                hardware_type = "Loopback"
+                bandwidth = 8000000
+            elif is_irb:
+                hardware_type = "VLAN"
+                bandwidth = 1000000
+            elif is_lag:
+                hardware_type = "Port-Channel"
+                show_phys_line = True
+                if hasattr(intf, 'lag') and intf.lag.exists():
+                    lag_spd = self._safe_get(intf.lag.get(), 'lag_speed', None)
+                    if lag_spd is not None:
+                        try:
+                            spd_mbps = int(lag_spd)
+                            bandwidth = spd_mbps * 1000
+                            port_speed = f"{spd_mbps // 1000}G" if spd_mbps >= 1000 else f"{spd_mbps}M"
+                        except Exception:
+                            pass
+                if not port_speed:
+                    port_speed = "0G"
+            else:
+                hardware_type = "Ethernet"
+                show_phys_line = True
+                try:
+                    if is_eth:
+                        eth_obj = intf.ethernet.get()
+                        port_speed = self._safe_get(eth_obj, 'port_speed', None)
+                        duplex = self._safe_get(eth_obj, 'duplex_mode', 'Full') or 'Full'
+                        an = self._safe_get(eth_obj, 'auto_negotiate', None)
+                        if an is True or an == 'true' or an == 'enable':
+                            auto_negotiation = "on"
+                    if port_speed and isinstance(port_speed, str):
+                        bandwidth = self.convert_speed_to_kbit(port_speed)
+                    else:
+                        port_speed = "1G" if raw_lower.startswith('mgmt') else "Unknown"
+                        bandwidth = 1000000 if raw_lower.startswith('mgmt') else 0
+                except Exception:
+                    port_speed = "Unknown"
+                    bandwidth = 0
+
             #calculating the uptime
             last_change_val = self._safe_get(intf, 'last_change', None)
             if oper_status == "up" and last_change_val:
@@ -242,7 +335,7 @@ class InterfaceDetails(object):
             crc_errors = 0
             pause_input = 0
             pause_output = 0
-            if hasattr(intf, 'ethernet') and intf.ethernet.exists():
+            if is_eth:
                 eth_obj = intf.ethernet.get()
                 if hasattr(eth_obj, 'statistics') and eth_obj.statistics.exists():
                     eth_stats = eth_obj.statistics.get()
@@ -262,12 +355,20 @@ class InterfaceDetails(object):
             input_utilization = self.calculate_utilization(input_rate, port_speed)
             output_utilization = self.calculate_utilization(output_rate, port_speed)
 
-
             template_string = """
 {{ interface_name }} is {{ oper_status }}, line protocol is {{ line_protocol_status }} ({{ connection_status }})
+{%- if hardware == 'Loopback' %}
+  Hardware is {{ hardware }}
+{%- else %}
   Hardware is {{ hardware }}, address is {{ mac_address }} (bia {{ bia_address }})
-  Ethernet MTU {{ mtu }} bytes, BW {{ bandwidth }} kbit
+{%- endif %}
+{%- if ip_addr %}
+  Internet address is {{ ip_addr }}
+{%- endif %}
+  {{ mtu_label }} MTU {{ mtu }} bytes, BW {{ bandwidth }} kbit
+{%- if show_phys_line %}
   {{ duplex }}-duplex, {{ speed }}, auto negotiation: {{ auto_negotiation }}
+{%- endif %}
   Up {{ uptime }}
   Loopback Mode : {{ loopback_mode }}
   {{ link_changes }} link status changes since last clear
@@ -285,17 +386,19 @@ class InterfaceDetails(object):
     {{ late_collisions }} late collision, {{ deferred }} deferred, {{ output_discards }} output discards
     {{ pause_output }} PAUSE output"""
 
-
             data = {
             "interface_name": interface_name,
             "oper_status": oper_status,
             "line_protocol_status": line_protocol_status,
             "connection_status": connection_status,
-            "hardware": "Ethernet",
+            "hardware": hardware_type,
             "mac_address": mac_address,
             "bia_address": bia_address,
+            "ip_addr": ip_addr,
+            "mtu_label": "IP" if (is_loop or is_irb) else "Ethernet",
             "mtu": mtu,
             "bandwidth": bandwidth,
+            "show_phys_line": show_phys_line,
             "duplex": duplex,
             "speed": port_speed,
             "auto_negotiation": auto_negotiation,

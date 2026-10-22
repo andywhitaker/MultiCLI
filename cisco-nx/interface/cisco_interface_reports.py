@@ -38,22 +38,35 @@ def format_cisco_intf(name, short=True):
         return f"Vlan{num}"
     return name
 
-def cisco_to_srl_intf(name):
+def _cisco_to_srl_intf(name):
     """Convert Cisco NX-OS interface name to SR Linux format."""
     if not name or name == '*':
         return '*'
-    name = str(name).strip()
-    m = re.match(r'^(?:Ethernet|Eth)(\d+/\d+)$', name, re.IGNORECASE)
+    s = str(name).strip()
+    if '.' in s and not s.lower().startswith('vlan'):
+        s = s.split('.', 1)[0]
+    low = s.lower()
+    m = re.match(r'^et(?:h(?:ernet)?)?[-_]?(\d+/\d+(?:/\d+)?)$', low)
     if m:
         return f"ethernet-{m.group(1)}"
-    m = re.match(r'^(?:Loopback|Lo)(\d+)$', name, re.IGNORECASE)
+    m = re.match(r'^lo(?:opback)?[-_]?(\d+)$', low)
     if m:
         num = m.group(1)
         return "system0" if num == "0" else f"lo{num}"
-    m = re.match(r'^(?:Port-channel|Po)(\d+)$', name, re.IGNORECASE)
+    m = re.match(r'^po(?:rt-channel)?[-_]?(\d+)$', low)
     if m:
         return f"lag{m.group(1)}"
-    return name
+    m = re.match(r'^(?:ma(?:nagement)?|mgmt)[-_]?(\d+)$', low)
+    if m:
+        return "mgmt0"
+    m = re.match(r'^vl(?:an)?[-_]?(\d+)$', low)
+    if m:
+        return "irb0"
+    if low == 'irb':
+        return "irb0"
+    return s
+
+cisco_to_srl_intf = _cisco_to_srl_intf
 
 def cisco_mac_format(mac):
     """Format MAC address to Cisco dotted hex notation (xxxx.xxxx.xxxx)."""
@@ -626,16 +639,30 @@ class CiscoInterfaceReports:
     def show_interface_detail(self, state, output, arguments=None):
         """Display Cisco NX-OS style 'show interface [name]'."""
         target_name = '*'
-        if arguments:
+        for src in (arguments, getattr(state, 'line_commands', None)):
+            if not src:
+                continue
             try:
-                target_name = arguments.get('interface', 'name') or '*'
+                if hasattr(src, 'has_node'):
+                    if src.has_node('interface'):
+                        val = src.get_value_or('interface', 'name', '*')
+                        if val and val != '*':
+                            target_name = val
+                            break
+                    if src.has_node('interfaces'):
+                        val = src.get_value_or('interfaces', 'name', '*')
+                        if val and val != '*':
+                            target_name = val
+                            break
+                if hasattr(src, 'get'):
+                    val = src.get('interface', 'name')
+                    if val and val != '*':
+                        target_name = val
+                        break
             except Exception:
-                try:
-                    target_name = arguments.get('interfaces', 'name') or '*'
-                except Exception:
-                    target_name = '*'
+                pass
 
-        srl_name = cisco_to_srl_intf(target_name)
+        srl_name = _cisco_to_srl_intf(target_name)
         path = build_path('/interface[name={name}]', name=srl_name)
         try:
             data = state.server.get_data_store(DataStore.State).get_data(path, recursive=True, include_container_children=True)
@@ -657,25 +684,46 @@ class CiscoInterfaceReports:
             desc = getattr(intf, 'description', '')
             mtu = getattr(intf, 'mtu', 1500) or 1500
 
-            # Ethernet-specific attributes
+            raw_lower = str(name).lower()
+            is_eth = hasattr(intf, 'ethernet') and intf.ethernet.exists()
+            is_lag = raw_lower.startswith('lag')
+            is_loop = raw_lower.startswith('system') or raw_lower.startswith('lo')
+            is_irb = raw_lower.startswith('irb')
+
+            # Ethernet/Hardware-specific attributes
             mac_addr = "0000.0000.0000"
             bia_addr = "0000.0000.0000"
-            bw_kbit = 100000000
+            bw_kbit = 8000000 if is_loop else (1000000 if (is_irb or raw_lower.startswith('mgmt')) else 0)
             duplex = "full"
-            speed_val = "100 Gb/s"
+            auto_neg = "off"
+            speed_val = "1000 Mb/s" if raw_lower.startswith('mgmt') else "Unknown"
             crc_errors = 0
             giants = 0
             runts = 0
 
-            if hasattr(intf, 'ethernet') and intf.ethernet.exists():
+            if is_lag and hasattr(intf, 'lag') and intf.lag.exists():
+                try:
+                    lag_obj = intf.lag.get()
+                    lag_spd = getattr(lag_obj, 'lag_speed', None)
+                    if lag_spd is not None:
+                        spd_mbps = int(lag_spd)
+                        bw_kbit = spd_mbps * 1000
+                        speed_val = f"{spd_mbps // 1000} Gb/s" if spd_mbps >= 1000 else f"{spd_mbps} Mb/s"
+                except Exception:
+                    pass
+
+            if is_eth:
                 eth = intf.ethernet.get()
                 raw_mac = getattr(eth, 'hw_mac_address', None)
                 if raw_mac:
                     mac_addr = cisco_mac_format(raw_mac)
                     bia_addr = mac_addr
-                raw_speed = getattr(eth, 'port_speed', '100G') or '100G'
-                port_speed = str(raw_speed).upper()
-                if '100G' in port_speed:
+                raw_speed = getattr(eth, 'port_speed', None)
+                port_speed = str(raw_speed or '').upper()
+                if '400G' in port_speed:
+                    bw_kbit = 400000000
+                    speed_val = "400 Gb/s"
+                elif '100G' in port_speed:
                     bw_kbit = 100000000
                     speed_val = "100 Gb/s"
                 elif '40G' in port_speed:
@@ -701,7 +749,8 @@ class CiscoInterfaceReports:
 
                 try:
                     raw_duplex = eth.duplex_mode
-                    duplex = str(raw_duplex).lower()
+                    if raw_duplex:
+                        duplex = str(raw_duplex).lower()
                 except Exception:
                     duplex = "full"
 
@@ -787,11 +836,20 @@ class CiscoInterfaceReports:
                                 ip_line = f"  Internet Address is {addr.ip_prefix}"
                                 break
 
+            if is_loop:
+                hw_line = "  Hardware: Loopback"
+            elif is_irb:
+                hw_line = f"  Hardware: SVI, address: {mac_addr} (bia {bia_addr})"
+            elif is_lag:
+                hw_line = f"  Hardware: Port-Channel, address: {mac_addr} (bia {bia_addr})"
+            else:
+                hw_line = f"  Hardware: Ethernet, address: {mac_addr} (bia {bia_addr})"
+
             # Format Cisco NX-OS block
             block_lines = [
                 f"{c_name} is {oper_status}",
                 f"admin state is {admin_status}, Dedicated Interface",
-                f"  Hardware: Ethernet, address: {mac_addr} (bia {bia_addr})",
+                hw_line,
             ]
             if desc:
                 block_lines.append(f"  Description: {desc}")
@@ -808,15 +866,21 @@ class CiscoInterfaceReports:
             except Exception:
                 raw_tpid = ''
             ethertype = "0x88a8" if "88A8" in raw_tpid.upper() else "0x8100"
+            encap_type = "LOOPBACK" if is_loop else "ARPA"
             block_lines.extend([
                 f"  MTU {mtu} bytes, BW {bw_kbit} Kbit",
                 f"  reliability {reliability}/255, txload {txload}/255, rxload {rxload}/255",
-                f"  Encapsulation ARPA, medium is broadcast",
-                f"  Port mode is {mode_str}",
-                f"  {duplex}-duplex, {speed_val}",
-                f"  Auto-Negotiation is turned {auto_neg}",
-                f"  Rate mode is dedicated",
-                f"  EtherType is {ethertype}",
+                f"  Encapsulation {encap_type}, medium is broadcast",
+            ])
+            if not is_loop and not is_irb:
+                block_lines.extend([
+                    f"  Port mode is {mode_str}",
+                    f"  {duplex}-duplex, {speed_val}",
+                    f"  Auto-Negotiation is turned {auto_neg}",
+                    f"  Rate mode is dedicated",
+                    f"  EtherType is {ethertype}",
+                ])
+            block_lines.extend([
                 f"  {carrier_transitions} link status changes since last clear",
                 f"  Last clearing of \"show interface\" counters never",
                 f"  {intf_resets} interface resets",
@@ -839,4 +903,7 @@ class CiscoInterfaceReports:
         if blocks:
             output.print_line("\n\n".join(blocks))
         output.print_line("\n----------------------------------------------------------------------------------------------------")
-        output.print_line("Try SR Linux command: show interface detail")
+        if srl_name and srl_name != '*':
+            output.print_line(f"Try SR Linux command: show interface {srl_name} detail")
+        else:
+            output.print_line("Try SR Linux command: show interface detail")

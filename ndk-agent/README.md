@@ -77,13 +77,13 @@ A:admin@srl-2# / multicli enabled-nos nokia-sros
 --{ !* candidate shared default }--[  ]--
 A:admin@srl-2# info detail multicli
     enabled-nos nokia-sros
-    repo-url https://github.com/srl-labs/MultiCLI/archive/refs/tags/v0.2.0.zip
+    repo-url https://github.com/srl-labs/multicli/archive/refs/heads/main.zip
 ```
 If no errors are present, “No errors” should be displayed in the error-messages leaf.
 ```
 A:admin@srl-2# info from state multicli
     enabled-nos nokia-sros
-    repo-url https://github.com/srl-labs/MultiCLI/archive/refs/tags/v0.2.0.zip
+    repo-url https://github.com/srl-labs/multicli/archive/refs/heads/main.zip
     error-messages "No errors"
 ```
 For the commands to be available, the user must re-login to the node. Below is an example of an SR OS command executed via MultiCLI on SR Linux:

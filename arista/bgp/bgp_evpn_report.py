@@ -479,7 +479,7 @@ class IpBgpReport:
             if state.system_features.bgp_rib_afi_safi_list_for_evpn:
                 rttable = evpn_rib_in_post.mac_ip_route
             else:
-                rttable = evpn_rib_in_post.mac_ip_route
+                rttable = evpn_rib_in_post.mac_ip_routes
             rt_type = '2'
             for route in rttable.items():
                 status = self._set_status_code(route)
@@ -502,7 +502,7 @@ class IpBgpReport:
             if state.system_features.bgp_rib_afi_safi_list_for_evpn:
                 rttable = evpn_rib_in_post.imet_route
             else:
-                rttable = evpn_rib_in_post.imet_route
+                rttable = evpn_rib_in_post.imet_routes
             rt_type = '3'
             for route in rttable.items():
                 status = self._set_status_code(route)
@@ -525,7 +525,7 @@ class IpBgpReport:
             if state.system_features.bgp_rib_afi_safi_list_for_evpn:
                 rttable = evpn_rib_in_post.ethernet_segment_route
             else:
-                rttable = evpn_rib_in_post.ethernet_segment_route
+                rttable = evpn_rib_in_post.ethernet_segment_routes
             rt_type = '4'
             for route in rttable.items():
                 status = self._set_status_code(route)
@@ -548,7 +548,7 @@ class IpBgpReport:
             if state.system_features.bgp_rib_afi_safi_list_for_evpn:
                 rttable = evpn_rib_in_post.ip_prefix_route
             else:
-                rttable = evpn_rib_in_post.ip_prefix_route
+                rttable = evpn_rib_in_post.ip_prefix_routes
             rt_type = '5'
             for route in rttable.items():
                 status = self._set_status_code(route)
@@ -572,23 +572,29 @@ class IpBgpReport:
         }
 
     def _populate_route_attrs(self, state, route_entry, netinst_name, attr_id, route_type='*'):
-        if not attr_id in self._attrSets_dict:
+        cache_key = (netinst_name, attr_id)
+        if cache_key not in self._attrSets_dict:
             path_attr = build_path('/network-instance[name={vrf}]/bgp-rib/attr-sets/attr-set[index={atr}]',
                               vrf=netinst_name, atr=str(attr_id))
             attrSets = state.server.get_data_store(DataStore.State).get_data(path_attr, recursive=True, include_container_children=True)
-            self._attrSets_dict[attr_id] = attrSets
+            self._attrSets_dict[cache_key] = attrSets
         else:
-            attrSets = self._attrSets_dict[attr_id]
+            attrSets = self._attrSets_dict[cache_key]
         for attr in attrSets.get_descendants('/network-instance/bgp-rib/attr-sets/attr-set'):
-            route_entry['nexthop_info'] = attr.next_hop
-            route_entry['locpref_info'] = attr.local_pref
-            as_path = attr.as_path.get().segment.get().member
-            if attr.origin == 'igp':
-                route_entry['path_info'] = ' '.join(map(str,as_path)) + ' i'
-            elif attr.origin == 'egp':
-                route_entry['path_info'] = ' '.join(map(str,as_path)) + ' e'
-            elif attr.origin == 'incomplete':
-                route_entry['path_info'] = '?'
+            route_entry['nexthop_info'] = getattr(attr, 'next_hop', '') or ''
+            route_entry['locpref_info'] = getattr(attr, 'local_pref', '') or ''
+            try:
+                as_path = attr.as_path.get().segment.get().member or []
+            except Exception:
+                as_path = []
+            as_str = (' '.join(map(str, as_path)) + ' ') if as_path else ''
+            origin = getattr(attr, 'origin', '')
+            if origin == 'igp':
+                route_entry['path_info'] = as_str + 'i'
+            elif origin == 'egp':
+                route_entry['path_info'] = as_str + 'e'
+            elif origin == 'incomplete':
+                route_entry['path_info'] = as_str + '?'
             if hasattr(attr, 'med') and attr.med:
                 route_entry['metric_info'] = attr.med
             else:

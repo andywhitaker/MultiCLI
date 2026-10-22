@@ -14,6 +14,7 @@ wherever the attributes don't line up some placeholder values may be used."""
 
 import datetime
 import ipaddress
+import re
 
 from srlinux.data import (
     Data,
@@ -26,47 +27,65 @@ from srlinux.schema.data_store import DataStore
 from srlinux.syntax import Syntax
 from srlinux import strings
 
-class Plugin(CliPlugin):
-    """ Base class that loads three classes each representing one of the
-    versions of the command being translated. """
-    def load(self, cli, **_kwargs):
-        """ Load the commands into the CLI show mode. """
-        interface = cli.show_mode.add_command(
-            JperInterfaceSummary.get_syntax(),
-            update_location=True,
-            callback=self._interface_summary,
-            schema=JperInterfaceSummary.get_data_schema(),
-        )
-        interface.add_command(
-            JperInterfaceBrief.get_syntax(),
-            update_location=True,
-            callback=self._interface_brief,
-            schema=JperInterfaceBrief.get_data_schema(),
-        )
-        interface.add_command(
-            JperInterfaceTerse.get_syntax(),
-            update_location=True,
-            callback=self._interface_terse,
-            schema=JperInterfaceTerse.get_data_schema(),
-        )
 
-    @staticmethod
-    def _interface_summary(state, arguments, output, **_kwargs):
-        if not state.is_last_command:
-            return
-        JperInterfaceSummary().print(state, arguments, output, **_kwargs)
+def _junos_to_srl_intf(name):
+    """Translate Juniper JUNOS interface naming to SR Linux naming."""
+    if not name or name == "*":
+        return name
+    raw = str(name).strip()
+    sub = ""
+    if "." in raw:
+        base, sub_part = raw.split(".", 1)
+        sub = f".{sub_part}"
+    else:
+        base = raw
+    low = base.lower()
+    m = re.match(r'^(?:et|xe|ge)-(\d+)/(\d+)/(\d+)(?::(\d+))?$', low)
+    if m:
+        fpc, pic, port, ch = m.group(1), m.group(2), m.group(3), m.group(4)
+        if fpc == "0":
+            slot = 1
+            port_num = int(port) + 1
+        else:
+            slot = int(fpc)
+            port_num = int(port) if int(port) > 0 else 1
+        if ch is not None:
+            return f"ethernet-{slot}/{port_num}/{ch}{sub}"
+        return f"ethernet-{slot}/{port_num}{sub}"
+    m = re.match(r'^ae(\d+)$', low)
+    if m:
+        return f"lag{m.group(1)}{sub}"
+    m = re.match(r'^lo(\d+)$', low)
+    if m:
+        return f"system0{sub}" if m.group(1) == "0" else f"lo{m.group(1)}{sub}"
+    m = re.match(r'^(?:fxp|em|me)(\d+)$', low)
+    if m:
+        return f"mgmt0{sub}"
+    if low == "irb":
+        return f"irb0{sub}"
+    return raw
 
-    @staticmethod
-    def _interface_brief(state, arguments, output, **_kwargs):
-        if not state.is_last_command:
-            return
-        JperInterfaceBrief().print(state, arguments, output, **_kwargs)
 
-    @staticmethod
-    def _interface_terse(state, arguments, output, **_kwargs):
-        if not state.is_last_command:
-            return
-        JperInterfaceTerse().print(state, arguments, output, **_kwargs)
+def _extract_junos_intf_arg(state, arguments, subcmd_node=None):
+    """Extract interface name argument from arguments or state.line_commands."""
+    argument_name = "*"
+    for src in (arguments, getattr(state, "line_commands", None)):
+        if src is None:
+            continue
+        try:
+            if src.has_node("interfaces"):
+                val = src.get_value_or("interfaces", "name", "*")
+                if val and val != "*":
+                    argument_name = str(val)
+                    break
+            if subcmd_node and src.has_node(subcmd_node):
+                val = src.get_value_or(subcmd_node, "name", "*")
+                if val and val != "*":
+                    argument_name = str(val)
+                    break
+        except Exception:
+            pass
+    return _junos_to_srl_intf(argument_name)
 
 
 class JperInterfaceBrief():
@@ -154,12 +173,7 @@ class JperInterfaceBrief():
 
     def _stream_interfaces(self, state, arguments):
         """Function to return state data (specific or all if unspecified) from SR Linux"""
-        if arguments.has_node("interfaces") and arguments.get("interfaces", "name") != "*":
-            argument_name = arguments.get("interfaces", "name")
-        elif arguments.has_node("brief"):
-            argument_name = arguments.get("brief", "name")
-        else:
-            argument_name = "*"
+        argument_name = _extract_junos_intf_arg(state, arguments, subcmd_node="brief")
         intf_name, subintf_index = strings.extract_interface_name_subinterface_index(argument_name)
         self._only_subinterface = subintf_index is not None
         path = build_path(f"/interface[name={intf_name}]")
@@ -362,12 +376,7 @@ class JperInterfaceTerse():
 
     def _stream_interfaces(self, state, arguments):
         """Function to return state data (specific or all if unspecified) from SR Linux"""
-        if arguments.has_node("interfaces") and arguments.get("interfaces", "name") != "*":
-            argument_name = arguments.get("interfaces", "name")
-        elif arguments.has_node("terse"):
-            argument_name = arguments.get("terse", "name")
-        else:
-            argument_name = "*"
+        argument_name = _extract_junos_intf_arg(state, arguments, subcmd_node="terse")
         intf_name, subintf_index = strings.extract_interface_name_subinterface_index(argument_name)
         self._only_subinterface = subintf_index is not None
         path = build_path(f"/interface[name={intf_name}]")
@@ -587,7 +596,7 @@ class JperInterfaceSummary():
 
     def _stream_interfaces(self, state, arguments):
         """Function to return state data (specific or all if unspecified) from SR Linux"""
-        argument_name = arguments.get("interfaces", "name") if arguments.has_node("interfaces") else "*"
+        argument_name = _extract_junos_intf_arg(state, arguments)
         intf_name, subintf_index = strings.extract_interface_name_subinterface_index(argument_name)
         self._only_subinterface = subintf_index is not None
         path = build_path(f"/interface[name={intf_name}]")
@@ -658,10 +667,12 @@ class JperInterfaceSummary():
                 time_of_last_flap_str = getattr(interface, 'last_change', None)
                 if time_of_last_flap_str:
                     try:
-                        clean_ts = time_of_last_flap_str.rstrip('Z')
+                        clean_ts = time_of_last_flap_str.replace('Z', '+00:00')
                         time_of_last_flap = datetime.datetime.fromisoformat(clean_ts)
-                        time_since_last_flap = datetime.datetime.now() - time_of_last_flap
-                        total_seconds = int(time_since_last_flap.total_seconds())
+                        if time_of_last_flap.tzinfo is None:
+                            time_of_last_flap = time_of_last_flap.replace(tzinfo=datetime.timezone.utc)
+                        time_since_last_flap = datetime.datetime.now(datetime.timezone.utc) - time_of_last_flap
+                        total_seconds = max(0, int(time_since_last_flap.total_seconds()))
                         weeks, remainder = divmod(total_seconds, 60 * 60 * 24 * 7)
                         days, remainder = divmod(remainder, 60 * 60 * 24)
                         hours, remainder = divmod(remainder, 60 * 60)

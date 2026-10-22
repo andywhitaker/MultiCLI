@@ -33,33 +33,77 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ -z "$TARGET_NOS" ]; then
-    echo "Usage: $0 <all|arista|cisco|juniper|nokia|comma-separated> [node_name (default: leaf1)] [--default <arista|cisco|juniper|nokia|none>]"
+    echo "Usage: $0 <all|arista|cisco|juniper|nokia|comma-separated> [node_name (default: leaf1-1)] [--default <arista|cisco|juniper|nokia|none>]"
     echo ""
     echo "Examples:"
-    echo "  $0 all leaf1                 # Installs all submodes on leaf1 with default persona (arista)"
-    echo "  $0 all leaf2                 # Installs all submodes on leaf2 with default persona (cisco)"
-    echo "  $0 all leaf3                 # Installs all submodes on leaf3 with default persona (juniper)"
-    echo "  $0 arista leaf1              # Installs only Arista EOS on leaf1"
-    echo "  $0 cisco leaf2               # Installs only Cisco NX-OS on leaf2"
-    echo "  $0 juniper leaf3             # Installs only Juniper JUNOS on leaf3"
-    echo "  $0 nokia leaf1               # Installs only Nokia SR OS on leaf1"
-    echo "  $0 eos,nxos leaf1            # Installs Arista EOS and Cisco NX-OS on leaf1"
+    echo "  $0 all leaf1-1               # Installs all submodes on leaf1-1 with default persona (arista)"
+    echo "  $0 all leaf1-2               # Installs all submodes on leaf1-2 with default persona (cisco)"
+    echo "  $0 all leaf2-1               # Installs all submodes on leaf2-1 with default persona (juniper)"
+    echo "  $0 all spine --default none  # Installs all submodes on spine without overriding top-level show"
+    echo "  $0 arista leaf1-1            # Installs only Arista EOS on leaf1-1"
+    echo "  $0 cisco leaf1-2             # Installs only Cisco NX-OS on leaf1-2"
+    echo "  $0 juniper leaf2-1           # Installs only Juniper JUNOS on leaf2-1"
+    echo "  $0 nokia leaf2-2             # Installs only Nokia SR OS on leaf2-2"
+    echo "  $0 eos,nxos spine            # Installs Arista EOS and Cisco NX-OS on spine"
     exit 1
 fi
 
-# Infer default persona if not explicitly passed
-if [ -z "$DEFAULT_PERSONA" ]; then
-    case "$TARGET_NODE" in
-        *leaf1-1*) DEFAULT_PERSONA="arista" ;;
-        *leaf1-2*) DEFAULT_PERSONA="cisco" ;;
-        *leaf2-1*) DEFAULT_PERSONA="juniper" ;;
-        *leaf2-2*) DEFAULT_PERSONA="nokia" ;;
-        *leaf1*) DEFAULT_PERSONA="arista" ;;
-        *leaf2*) DEFAULT_PERSONA="cisco" ;;
-        *leaf3*) DEFAULT_PERSONA="juniper" ;;
-        *leaf4*) DEFAULT_PERSONA="nokia" ;;
-        *) DEFAULT_PERSONA="arista" ;;
+# Parse target NOS list first so single-vendor invocations default to that vendor
+VENDORS=()
+IFS=',' read -ra ADDR <<< "$TARGET_NOS"
+for part in "${ADDR[@]}"; do
+    case "$part" in
+        all|multicli)
+            VENDORS=("arista" "cisco-nx" "juniper" "nokia")
+            break
+            ;;
+        none|disable|off|srl|srlinux)
+            VENDORS=()
+            DEFAULT_PERSONA="none"
+            break
+            ;;
+        arista|eos)
+            VENDORS+=("arista")
+            ;;
+        cisco|cisco-nx|nxos)
+            VENDORS+=("cisco-nx")
+            ;;
+        juniper|junos)
+            VENDORS+=("juniper")
+            ;;
+        nokia|sros)
+            VENDORS+=("nokia")
+            ;;
+        *)
+            echo "Error: Unknown NOS '$part'. Choose 'all', 'arista', 'cisco', 'juniper', 'nokia', or 'none'."
+            exit 1
+            ;;
     esac
+done
+
+# Infer default persona if not explicitly passed via --default
+if [ -z "$DEFAULT_PERSONA" ]; then
+    if [ "${#VENDORS[@]}" -eq 1 ]; then
+        case "${VENDORS[0]}" in
+            arista) DEFAULT_PERSONA="arista" ;;
+            cisco-nx) DEFAULT_PERSONA="cisco" ;;
+            juniper) DEFAULT_PERSONA="juniper" ;;
+            nokia) DEFAULT_PERSONA="nokia" ;;
+        esac
+    else
+        case "$TARGET_NODE" in
+            *leaf1-1*) DEFAULT_PERSONA="arista" ;;
+            *leaf1-2*) DEFAULT_PERSONA="cisco" ;;
+            *leaf2-1*) DEFAULT_PERSONA="juniper" ;;
+            *leaf2-2*) DEFAULT_PERSONA="nokia" ;;
+            *spine*) DEFAULT_PERSONA="none" ;;
+            *leaf1*) DEFAULT_PERSONA="arista" ;;
+            *leaf2*) DEFAULT_PERSONA="cisco" ;;
+            *leaf3*) DEFAULT_PERSONA="juniper" ;;
+            *leaf4*) DEFAULT_PERSONA="nokia" ;;
+            *) DEFAULT_PERSONA="none" ;;
+        esac
+    fi
 fi
 
 # Validate default persona
@@ -111,39 +155,6 @@ if [ -z "$TARGET_CLI_DIR" ]; then
         exit 1
     fi
 fi
-
-# Parse target NOS list
-VENDORS=()
-IFS=',' read -ra ADDR <<< "$TARGET_NOS"
-for part in "${ADDR[@]}"; do
-    case "$part" in
-        all|multicli)
-            VENDORS=("arista" "cisco-nx" "juniper" "nokia")
-            break
-            ;;
-        none)
-            VENDORS=()
-            DEFAULT_PERSONA="none"
-            break
-            ;;
-        arista|eos)
-            VENDORS+=("arista")
-            ;;
-        cisco|cisco-nx|nxos)
-            VENDORS+=("cisco-nx")
-            ;;
-        juniper|junos)
-            VENDORS+=("juniper")
-            ;;
-        nokia|sros)
-            VENDORS+=("nokia")
-            ;;
-        *)
-            echo "Error: Unknown NOS '$part'. Choose 'all', 'arista', 'cisco', 'juniper', 'nokia', or 'none'."
-            exit 1
-            ;;
-    esac
-done
 
 echo "==> Configuring node '$TARGET_NODE' with MultiCLI [${VENDORS[*]}] (default persona: $DEFAULT_PERSONA)..."
 

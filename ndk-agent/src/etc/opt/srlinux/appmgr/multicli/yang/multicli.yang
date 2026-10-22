@@ -39,7 +39,7 @@ module multicli {
             type string {
                 pattern 'https?://.+\.zip';
             }
-            default "https://github.com/srl-labs/MultiCLI/archive/refs/tags/v0.2.0.zip";
+            default "https://github.com/srl-labs/multicli/archive/refs/heads/main.zip";
             description "Repo URL - ZIP File";
         }
 

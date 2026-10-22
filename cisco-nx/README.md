@@ -52,10 +52,10 @@ MultiCLI allows users to execute familiar Cisco NX-OS commands on Nokia SR Linux
 Deploy the containerlab topology and log in to a switch configured with the Cisco NX-OS persona (or use `cnxuser/cnxuser`):
 
 ```bash
-docker exec -it leaf2 sr_cli
+docker exec -it leaf1-2 sr_cli
 ```
 
 Or switch any node on-the-fly using the helper script:
 ```bash
-./switch-multicli.sh cisco leaf1
+./switch-multicli.sh cisco leaf1-2
 ```

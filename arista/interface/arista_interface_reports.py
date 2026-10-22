@@ -23,6 +23,8 @@ def format_arista_intf(name, short=False):
     if not name:
         return ""
     name = str(name)
+    if name.startswith('irb'):
+        return name
     if name.endswith('.0'):
         name = name[:-2]
     if name.startswith('ethernet-'):
@@ -40,8 +42,6 @@ def format_arista_intf(name, short=False):
     if name.startswith('system'):
         num = name.replace('system', '') or '0'
         return f"Lo{num}" if short else f"Loopback{num}"
-    if name.startswith('irb'):
-        return name
     return name
 
 def arista_intf_sort_key(name):
@@ -118,7 +118,7 @@ class AristaInterfaceReports:
                                         break
 
                         sub_mtu = getattr(sub, 'ip_mtu', None) or mtu_val
-                        sub_name = f"{intf_name}.{sub.index}" if str(sub.index) != '0' else intf_name
+                        sub_name = f"{intf_name}.{sub.index}"
                         display_name = format_arista_intf(sub_name, short=False)
                         rows.append({
                             'display_name': display_name,
@@ -303,7 +303,7 @@ class AristaInterfaceReports:
                                 for n in arp_node.neighbor.items():
                                     ip_addr = getattr(n, 'ipv4_address', '')
                                     mac = format_mac_cisco_arista(getattr(n, 'link_layer_address', ''))
-                                    full_intf = f"{intf.name}.{sub.index}" if str(sub.index) != '0' else intf.name
+                                    full_intf = f"{intf.name}.{sub.index}"
                                     disp_intf = format_arista_intf(full_intf, short=False)
                                     
                                     age_str = "-"

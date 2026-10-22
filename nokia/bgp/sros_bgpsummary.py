@@ -362,9 +362,9 @@ class BgpSummaryFilter(object):
             neighbor_data[neighbor_ip]['session_state'] = getattr(n_node, 'session_state', 'idle') or 'idle'
             if neighbor_data[neighbor_ip]['session_state'] == 'established':
                 neighbor_data[neighbor_ip]['uptime'] = getattr(n_node, 'last_established', 0)
-                neighbor_data[neighbor_ip]['routes_received'] = getattr(n_node.afi_safi.get(), 'received_routes', 0) or 0
-                neighbor_data[neighbor_ip]['routes_active'] = getattr(n_node.afi_safi.get(), 'active_routes', 0) or 0
-                neighbor_data[neighbor_ip]['routes_sent'] = getattr(n_node.afi_safi.get(), 'sent_routes', 0) or 0
+                neighbor_data[neighbor_ip]['routes_received'] = 0
+                neighbor_data[neighbor_ip]['routes_active'] = 0
+                neighbor_data[neighbor_ip]['routes_sent'] = 0
             
                 # geting all afi_safi information per BGP neighbor only for Enabled afi_safi
                 counter = 0
@@ -373,6 +373,9 @@ class BgpSummaryFilter(object):
                         rcv_r = getattr(afi_safi, 'received_routes', 0) or 0
                         act_r = getattr(afi_safi, 'active_routes', 0) or 0
                         snt_r = getattr(afi_safi, 'sent_routes', 0) or 0
+                        neighbor_data[neighbor_ip]['routes_received'] += rcv_r
+                        neighbor_data[neighbor_ip]['routes_active'] += act_r
+                        neighbor_data[neighbor_ip]['routes_sent'] += snt_r
                         neighbor_data[neighbor_ip][f'afi_safi_{counter}'] = {}
                         neighbor_data[neighbor_ip][f'afi_safi_{counter}']['admin_state'] = afi_safi.admin_state
                         neighbor_data[neighbor_ip][f'afi_safi_{counter}']['name'] = afi_safi.afi_safi_name
@@ -516,31 +519,20 @@ class SrosBgpNeighborFormatter(Formatter):
         # Print uptime if session is established, otherwise print session_state
         if entry.session_state == "established":
             uptime = self._get_time(entry.uptime)
+            state_str = ""
         else:
-            uptime = entry.session_state
+            uptime = "00d00h00m"
+            state_str = str(entry.session_state).capitalize()
+
+        afi_lines = list(entry.afi_safi.iter_format(max_width)) if entry.afi_safi.exists() else []
+        col0 = afi_lines[0] if len(afi_lines) > 0 else state_str
+        col1 = afi_lines[1] if len(afi_lines) > 1 else ""
 
         yield f'{entry.ip}'
-        line0 = f'                {entry.asn:<7}    {entry.pkts_received:<7}0 {uptime:<10} '
-        line1 = f'                           {entry.pkts_sent:<7}0           '
-
-        # print afi_safi information
-        if entry.afi_safi.exists(): 
-            afi_safi_info = entry.afi_safi.iter_format(max_width)
-            
-            counter = entry.afi_safi.get().afi_safi_name # need to be fixed to iterate for each afi_safi entry
-            if counter == 'afi_safi_0': prefix = line0
-            elif counter == 'afi_safi_1': prefix = line1
-            else: prefix = f'                                             '
-
-            # line = prefix.join(afi_safi_info)
-            line = ''.join(afi_safi_info) # temp
-        else:
-            line = ''
-
-        yield line0 # temp
-        yield line1 # temp
-
-        yield line
+        yield f'                {entry.asn:<7}    {entry.pkts_received:<7}0 {uptime:<10} {col0}'.rstrip()
+        yield f'                           {entry.pkts_sent:<7}0            {col1}'.rstrip()
+        for extra_afi in afi_lines[2:]:
+            yield f'                                             {extra_afi}'
 
     def _get_time(self, time_value):
         if time_value != 0 and time_value:
@@ -587,6 +579,4 @@ class SrosBgpAfiSafiFormatter(TagValueFormatter):
         }
 
         afi_safi_label = sros_afisafi.get(entry.name, entry.name)
-        yield f'                                             {entry.received_routes}/{entry.active_routes}/{entry.sent_routes} ({afi_safi_label})\n'
-  
-        
+        yield f'{entry.received_routes}/{entry.active_routes}/{entry.sent_routes} ({afi_safi_label})'

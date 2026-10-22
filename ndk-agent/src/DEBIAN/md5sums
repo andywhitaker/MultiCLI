@@ -1,7 +1,7 @@
-4b43bd901ae0e3b06c40809f9d997b9a  etc/opt/srlinux/appmgr/multicli/multicli.py
-7d7214616f5f3c7aaa77ae8e65244f5f  etc/opt/srlinux/appmgr/multicli/multicli.sh
+ca37d0a2d40145549f7e5a0efdf3830c  etc/opt/srlinux/appmgr/multicli/multicli.py
+c75986830c82a12ee0c2aadbd0d55237  etc/opt/srlinux/appmgr/multicli/multicli.sh
 fdf208326e8bc346f01c4d575cbf1bcd  etc/opt/srlinux/appmgr/multicli/multicli_version.sh
-2dc9f7d0e1cc84a466390f6c93d08464  etc/opt/srlinux/appmgr/multicli/yang/multicli.yang
+9b32bb4e0543693eae8d509f6907e45b  etc/opt/srlinux/appmgr/multicli/yang/multicli.yang
 10d3b9244401146cf04ff93bc673a9fe  etc/opt/srlinux/appmgr/multicli.yml
 68b329da9893e34099c7d8ad5cb9c940  tmp/netns_install/netns-1.0-py3.6.egg-info/dependency_links.txt
 987a212a508df18ee1b88117c233d02d  tmp/netns_install/netns-1.0-py3.6.egg-info/installed-files.txt
